@@ -1,0 +1,80 @@
+---
+title: Literature Review
+---
+
+# Literature Review: TerminalWorld — A World Model for Terminal Agent Training
+
+This review surveys prior work in four areas relevant to TerminalWorld
+([Marin issue #5866](https://github.com/marin-community/marin/issues/5866)):
+(A) neural world models for code/web/interactive environments,
+(B) terminal agents and Terminal-Bench,
+(C) training agents inside learned simulators, and
+(D) co-evolution of policy and simulator.
+Each section concludes by flagging what is *missing* and the risks the proposal will need to confront.
+
+---
+
+## A. Neural world models for code, web, and interactive environments
+
+- **CWM: An Open-Weights LLM for Research on Code Generation with World Models** — Meta FAIR CodeGen team (Cummins, Leather, Markosyan, Pagliardini, Remez et al.), 2025. A 32B model "mid-trained on observation-action trajectories from Python interpreter and agentic Docker environments." Demonstrates that supervising on execution traces gives 65.8% on SWE-bench Verified and enables step-by-step Python execution simulation inside the model itself. [arxiv:2510.02387](https://arxiv.org/abs/2510.02387)
+- **WebDreamer / "Is Your LLM Secretly a World Model of the Internet?"** — Gu, Zheng et al., OSU NLP / Orby AI, TMLR 2025. Uses an LLM as a *natural-language* world model to simulate "what happens if I click X" for web planning; their distilled Dreamer-7B matches GPT-4o while being 4–5× more efficient than tree search in sandboxes. [arxiv:2411.06559](https://arxiv.org/abs/2411.06559)
+- **WebWorld: A Large-Scale World Model for Web Agent Training** — Xiao, Tu, Zou et al., Qwen team / Zhejiang Univ., 2026. Cited by the issue. Treats large-scale web simulation as the training substrate for agents; releases code at QwenLM/WebWorld. [arxiv:2602.14721v1](https://arxiv.org/pdf/2602.14721v1)
+- **R-WoM: Retrieval-augmented World Model for Computer-use Agents** — Mei, Guo, Chang et al., AWS AI, 2025. Explicitly identifies that pure-LLM world models hallucinate and degrade in long-horizon planning; grounds simulations with retrieved tutorials. +23.4% on OSWorld, +16.3% on WebArena. [arxiv:2510.11892](https://arxiv.org/abs/2510.11892)
+- **WorldCoder** — Tang, Key, Ellis, NeurIPS 2024. A model-based LLM agent that *writes Python* as its world model rather than simulating in latent space — a useful contrast to fully neural simulators. [arxiv:2402.12275](https://arxiv.org/abs/2402.12275)
+- **UI-Simulator: LLMs as Scalable, General-Purpose Simulators for Evolving Digital Agent Training** — Wang, Yin, Cui et al., UCLA, 2025. Generates synthetic UI states/transitions for WebArena and AndroidWorld training. [arxiv:2510.14969](https://arxiv.org/abs/2510.14969)
+- **Genie 2 / Genie 3** — DeepMind, 2024/2025. Foundation world models that generate playable 3D environments from a single image; relevant only as analogy — they show that learned simulators can be coherent for minutes of interactive use. [DeepMind blog](https://deepmind.google/blog/genie-2-a-large-scale-foundation-world-model/)
+- **UniSim / Sora-as-world-simulator** — Yang et al., ICLR 2024; Brooks et al., 2024. Generative video models repurposed as physics/world simulators — again, only an analogy for what learned simulators of *symbolic* environments might look like. [openreview](https://openreview.net/forum?id=sFyTZEqmUY)
+
+**Gap.** No prior work trains a neural network end-to-end to *emit the bytes a real shell would emit* given a command and prior session state. CWM trains *on* execution traces but does not position the model as the executor for downstream RL/SFT; WebDreamer/WebWorld/DynaWeb cover the web; WorldCoder writes code instead of simulating it. The terminal — discrete, partially-observable, with strict syntactic structure — is an untouched substrate.
+
+---
+
+## B. Terminal agents and Terminal-Bench
+
+- **Terminal-Bench: Benchmarking Agents on Hard, Realistic Tasks in Command Line Interfaces** — Merrill et al., Stanford / Laude Institute, Jan 2026. 89 hand-authored tasks in real sandboxed terminals; frontier agents are still under ~65%. [arxiv:2601.11868](https://arxiv.org/abs/2601.11868) · [tbench.ai](https://www.tbench.ai/)
+- **Terminus** — Laude Institute, 2025/2026. The reference test-bed agent that drives Terminal-Bench via tmux; Terminus 2 + Claude Opus 4.5 currently sits near the top of TB 2.0 (~58%). [tbench.ai/news/terminus](https://www.tbench.ai/news/terminus)
+- **ECHO** — Dimitris Papailiopoulos, Microsoft Research AI Frontiers, May 18, 2026. Adds an auxiliary cross-entropy loss on *terminal-response tokens* during SFT and GRPO so the agent learns an implicit world model of the shell. Reported as "basically free" and improves Qwen3 TB scores without extra compute. This is the direct empirical motivation TerminalWorld is extending. [Digg writeup](https://digg.com/ai/dxx7pn2s) · [original tweet](https://x.com/DimitrisPapail/status/2056368948870811746)
+- **Endless Terminals: Scaling RL Environments for Terminal Agents** — Gandhi, Garg, Goodman, Papailiopoulos, Stanford / MSR, Jan 2026. Procedural pipeline generating 3,255 containerized terminal tasks with tests; Qwen2.5-7B jumps 10.7→53.3% on their held-out set and gets meaningful TB 2.0 lift. Concrete demonstration that *environment quantity* is the bottleneck. [arxiv:2601.16443](https://arxiv.org/abs/2601.16443)
+- **Nemotron-Terminal / "On Data Engineering for Scaling LLM Terminal Capabilities"** — Pi, Lam, Shoeybi, Jannaty, Catanzaro, Ping, NVIDIA, 2026. Releases the Nemotron-Terminal-Corpus (~366k trajectories: ~226k dataset-adapter, ~140k skill-synthetic) and Nemotron-Terminal-8B/14B/32B; the 32B beats Qwen3-Coder-480B on TB 2.0 (27.4% vs 23.9%). This is the exact training corpus TerminalWorld will both consume and try to simulate. [arxiv:2602.21193](https://arxiv.org/abs/2602.21193) · [HF Corpus](https://huggingface.co/datasets/nvidia/Nemotron-Terminal-Corpus)
+- **OpenHands (CodeAct 2.1) and SWE-agent** — All-Hands AI / Princeton-Stanford, 2025. Open-source frameworks for terminal/shell-using software-engineering agents; OpenHands SDK hits 72% SWE-bench Verified with Sonnet 4.5. Together with Warp and Claude Code, they define the *consumer* of any TerminalWorld-trained policy. [arxiv:2511.03690](https://arxiv.org/abs/2511.03690)
+
+**Gap.** Existing terminal-agent training assumes a *real* Docker container behind every rollout. Endless Terminals, NemotronTerminal, R2E-Gym, and SWE-rebench all reduce the cost of building tasks, but every rollout still pays full container-startup + execution cost. Nobody has tried to *replace the container with a neural net* during training.
+
+---
+
+## C. Training agents in learned simulators (model-based RL for LLM agents)
+
+- **DreamerV3** — Hafner et al., Nature 2025. Canonical model-based RL: learn a latent world model, train the policy via imagined rollouts. Mastered Minecraft from scratch. Provides the theoretical template TerminalWorld implicitly follows. [arxiv:2301.04104](https://arxiv.org/abs/2301.04104)
+- **DynaWeb: Model-Based Reinforcement Learning of Web Agents** — Ding, Liu, Wang et al., Jan 2026. A "web world model" trained on millions of page-transition tuples that generates "dream" rollouts for on-policy RL of web agents; interleaves real-expert trajectories to combat compounding error. Closest prior work to TerminalWorld but for the browser. [arxiv:2601.22149](https://arxiv.org/abs/2601.22149)
+- **R2E-Gym** — Jain et al., COLM 2025. 8.1k synthetic SWE problems with executable tests; 51% on SWE-bench Verified for open-weight agents. Real (not neural) execution. [arxiv:2504.07164](https://arxiv.org/abs/2504.07164)
+- **SWE-rebench** — Badertdinov et al., 2025. Automated pipeline scraping real GitHub tasks for decontaminated SWE-agent training/eval. Real execution. [arxiv:2505.20411](https://arxiv.org/abs/2505.20411)
+- **AgentGen** — Hu et al., KDD 2025. LLM-generates environments + tasks for planning agents; BI-EVOL difficulty curriculum. Llama-3-8B beats GPT-3.5 after AgentGen training. [arxiv:2408.00764](https://arxiv.org/abs/2408.00764)
+- **NNetNav** — Murty et al., 2025. Unsupervised browser-agent training via 10k self-generated demonstrations; SOTA among unsupervised methods on WebArena. [arxiv:2410.02907](https://arxiv.org/abs/2410.02907)
+
+**Gap.** With the single exception of DynaWeb (web, not terminal), no published work trains an LLM agent end-to-end inside another LLM-as-environment for a *symbolic, execution-grounded* domain. Terminal is harder than web because the "next observation" must respect deterministic POSIX semantics rather than free-form HTML.
+
+---
+
+## D. Self-improvement / co-training of policy and simulator
+
+- **rStar-Math** — Guan et al., Microsoft, 2025. Co-evolved policy SLM and process-reward model via MCTS; lifts Qwen2.5-Math-7B from 58.8% → 90.0% on MATH. Template for joint solver/verifier training. [arxiv:2501.04519](https://arxiv.org/abs/2501.04519)
+- **Self-Challenging Language Model Agents (SCA)** — Zhou et al., Meta, June 2025. Challenger LLM proposes synthetic tool-use tasks; solver LLM is trained on them. +20.2% on tool-use evals with no human tasks. [arxiv:2506.01716](https://arxiv.org/abs/2506.01716)
+- **GenEnv: Difficulty-Aligned Co-Evolution Between LLM Agents and Environment Simulators** — Princeton / ByteDance, Dec 2025. Most directly relevant: an LLM acts as an *environment simulator* that adapts task difficulty to the policy's zone of proximal development; +40.3% on 7B baselines across five benchmarks. [arxiv:2512.19682](https://arxiv.org/abs/2512.19682)
+- **SPIN / Self-Rewarding LM / DPO-style self-play.** Standard reference points for closing the loop between a generator and an evaluator.
+
+**Gap.** Co-evolution work to date pairs a *task-generator* with a *policy* — not a *dynamics simulator* with a *policy*. TerminalWorld's "bonus" experiment (generating terminal tasks themselves) plus a learned dynamics model would, if both are co-trained with the policy, be the first such loop in the terminal domain.
+
+---
+
+## Known risks and prior negative results
+
+1. **Compounding error and exposure bias.** La Malfa et al. (Oxford / Turing, 2024) show that LLMs already lose accuracy on straight-line code beyond linear complexity and collapse on nested loops; later 2025/2026 work ("Demystifying Errors in LLM Reasoning Traces", "Beyond Exponential Decay") confirms error accumulation in long autoregressive traces. A terminal session is precisely a long autoregressive trace conditioned on the model's own previous (possibly wrong) outputs. [arxiv:2401.09074v2](https://arxiv.org/html/2401.09074v2)
+2. **Hallucination in computer-use world models.** R-WoM explicitly diagnoses this for OSWorld/WebArena and needed external retrieval to fix it. Pure neural terminals will likely need analogous grounding (e.g. mixing real container rollouts in periodically, à la DynaWeb's interleaving trick).
+3. **Code execution is known-hard.** CWM, despite 32B parameters and massive trace pretraining, only "early-result" simulates Python step-by-step. The shell is broader (filesystem state, processes, network, randomness) and a faithful simulator may be much harder than a faithful Python tracer.
+4. **Token-faithfulness vs semantic-faithfulness trade-off.** The proposal's own open question. WebDreamer succeeds despite natural-language-only state predictions; that suggests semantic faithfulness may suffice for downstream policy gains and tokenwise matching of `ls -la` output is overkill.
+
+---
+
+## Gap this work fills
+
+To our knowledge, **no published work has (a) trained a neural network end-to-end to act as a Linux terminal, nor (b) used such a learned terminal as the on-the-fly environment for SFT or RL of a coding agent.** The closest analogues are CWM (trains *on* execution traces but doesn't deploy as a simulator), DynaWeb (does this for the browser), R-WoM (LLM-as-simulator for computer-use, but at the GUI level and retrieval-augmented), GenEnv (LLM-as-task-generator co-evolved with a solver), and ECHO (terminal-output prediction as auxiliary loss, but no separate simulator). TerminalWorld's three-way comparison — vanilla SFT vs. ECHO-style unmasked SFT vs. SFT-against-a-learned-terminal — is precisely the controlled ablation the field needs to know whether a fully neural terminal gym is a viable substitute for (or accelerant of) the expensive Docker-per-rollout regime that currently dominates terminal-agent training. The Nemotron-Terminal corpus, Endless Terminals' procedural tasks, and Terminal-Bench 2.0 together make this the right moment to attempt it.
