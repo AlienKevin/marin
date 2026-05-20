@@ -1,10 +1,10 @@
 export default {
   logo: <span style={{ fontWeight: 600 }}>TerminalWorld</span>,
   project: {
-    link: 'https://github.com/AlienKevin/marin/tree/main/terminalworld-site',
+    link: 'https://github.com/AlienKevin/marin/tree/terminalworld-site/terminalworld-site',
   },
   docsRepositoryBase:
-    'https://github.com/AlienKevin/marin/tree/main/terminalworld-site',
+    'https://github.com/AlienKevin/marin/tree/terminalworld-site/terminalworld-site',
   footer: {
     content: (
       <span>
