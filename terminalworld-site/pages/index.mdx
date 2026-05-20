@@ -77,6 +77,47 @@ Each section concludes by flagging what is *missing* and the risks the proposal 
 
 ---
 
+## Phase 0: derisk on SWE-ZERO
+
+Before committing to the full NemotronTerminal + Terminal-Bench 2.0 setup we run a smaller, cheaper de-risk pass on **[SWE-ZERO-12M-trajectories](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-12M-trajectories)** evaluated on **SWE-bench Verified (100-task slice)**. Three reasons this is the right Phase 0 substrate:
+
+1. **Narrow command vocab.** SWE-ZERO's mini-swe-agent rollouts are deliberately restricted to read-mostly POSIX (`grep`, `find`, `cat`, `sed`, `ls`, `git`) and explicitly exclude `pytest`/build/test commands that need installed dependencies. The simulator's target distribution is correspondingly smaller — if we can't faithfully simulate `grep`/`find`/`cat` against a known repo snapshot, we have no chance at `pytest`. Read-mostly commands also have *deterministic, cheaply recomputable ground truth*, which makes Tier 1 intrinsic eval (next section) almost free.
+2. **Baselines already exist.** Arm (a) — standard assistant-masked SFT — has already been run at three scales in [marin#5611](https://github.com/marin-community/marin/issues/5611#issuecomment-4440640008) and produces a clean monotonic scaling line on the 100-task SWE-bench Verified slice: **10K → 7%, 100K → 9%, 1M → 11%** (Qwen3-1.7B-Base, mini-swe-agent v1 in Daytona). Arm (b) and arm (c) only need to be added on top.
+3. **Cheap iteration loop.** v5p-8 / 1.5 h per 10K SFT run; the 10K ⊂ 100K ⊂ 1M nesting means arm (b) and (c) can also be scaled out cheaply once 10K is settled.
+
+### The three arms (Phase 0)
+
+| Arm | Loss mask | Training data | Already done? |
+|---|---|---|---|
+| **(a) Standard assistant-masked SFT** | loss only on assistant turns (TRL `assistant_only_loss=True`-style; SWE-ZERO chat template with `{% generation %}` markers around assistant content) | SWE-ZERO trajectories, real mini-swe-agent rollouts | yes — 7/9/11 at 10K/100K/1M |
+| **(b) Full-transcript SFT (SFT-mode ECHO)** | loss on assistant **and** user (= terminal-output) turns; same single CE, no λ to tune | same SWE-ZERO trajectories | pending |
+| **(c) SFT against TerminalWorld** | standard assistant-mask, but trained on rollouts produced by a learned simulator | rollouts from a Qwen3-1.7B simulator (trained on SWE-ZERO env tokens) interacting with Qwen3-1.7B-Base as the agent, seeded from SWE-rebench PRs | pending |
+
+Per the goal of this phase, **only the 10K cell is filled in first** for arms (b) and (c). Scale-up (100K, 1M) is contingent on (b) or (c) at least matching (a) at 10K.
+
+### Portable gotchas (all inherited from #5611)
+
+Every one of these is load-bearing — without any of them arm (a) gets 0% on the 100-task slice. They are harness/checkpoint-level, not loss-level, so they apply to (b) and (c) verbatim:
+
+1. **`eos_token_id` patch on the SFT checkpoint**: `config.json` set to `[151643, 151645]` so vLLM stops on `<|im_end|>` at Qwen3 chat-template turn boundaries, not just `<|endoftext|>`.
+2. **Pass `max_tokens` to `litellm.completion`** explicitly in the Harbor adapter — otherwise vLLM generates up to `max_model_len − input` per turn.
+3. **SFT `model_config.max_seq_len = 32768`** (not 8192) so Llama-3 RoPE scales out past the trained context — anything past position 8191 otherwise collapses into the `!!!` attractor.
+4. **`action_observation_template = "Observation: {{output.output}}"`** — the default `{{output}}` renders the entire dict as a Python repr, which is OOD vs training.
+5. **Strip Daytona's `bash: cannot set terminal process group` stderr noise** from observations before they're fed back to the model.
+6. **`max_turns=50` and `max_output_tokens=4096`**, once the eos patch makes the model self-terminate efficiently.
+
+### Eval protocol (Phase 0)
+
+- **Eval set**: 100-task SWE-bench Verified slice, identical to #5611.
+- **Eval harness**: Harbor + mini-swe-agent v1 + Daytona, same `SWE_ZERO_SYSTEM_TEMPLATE` and `action_observation_template` as training.
+- **vLLM serving**: native on v6e-4 (us-east5), `max_model_len=32768`, `tensor_parallel_size=4`.
+- **Sharding**: 10 parallel iris jobs × 10 trials × 4 concurrent Daytona instances per shard = 40 in-flight per run. With the [Daytona account capped at 100 concurrent instances](https://www.daytona.io/), **arms (a)/(b)/(c) must be evaluated sequentially, not in parallel.**
+- **Reported numbers**: pass@1 on the 100-task slice + per-repo resolved-task breakdown + scale-up gating decision.
+
+Once we have (b) and (c) numbers at 10K we'll know whether the simulator path is worth scaling; if it is, the natural next step is the 100K cell, then the move to NemotronTerminal + Terminal-Bench 2.0 (Phase 1).
+
+---
+
 ## Evaluation methods
 
 Three layers of evidence have emerged in the last two years for grading a learned environment model: (1) *intrinsic* token- and state-level fidelity against held-out real rollouts (perplexity, exact-match, functional-equivalence in the style of CRUXEval/REval/CWM); (2) *long-horizon* coherence under autoregressive drift (DreamerV3, MuZero, R-WoM, DynaWeb all measure it, all show steep decay); and (3) *downstream policy gains* — the only metric that ultimately matters for an environment intended as a training substrate. TerminalWorld inherits the shape of these protocols but the terminal forces some new constraints: outputs are discrete byte streams with strict POSIX semantics, sessions are long, and the consumer (a Qwen3-8B coding agent) will be graded externally on Terminal-Bench 2.0. We propose a three-tier protocol — intrinsic, probe-set, downstream — patterned on what the field already accepts but specialized to shell semantics.
