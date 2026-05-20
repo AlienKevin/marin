@@ -8,7 +8,7 @@ export default {
   footer: {
     content: (
       <span>
-        TerminalWorld — neural terminal for agent training ·{' '}
+        TerminalWorld — a world model for terminal agent training ·{' '}
         <a
           href="https://github.com/marin-community/marin/issues/5866"
           target="_blank"
@@ -24,12 +24,12 @@ export default {
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <meta
         name="description"
-        content="TerminalWorld — a neural world model for terminal agent training. Reports, experiments, and updates."
+        content="TerminalWorld — a world model for terminal agent training. Reports, experiments, and updates."
       />
       <meta property="og:title" content="TerminalWorld" />
       <meta
         property="og:description"
-        content="A neural world model for terminal agent training."
+        content="A world model for terminal agent training."
       />
     </>
   ),

@@ -1,12 +1,12 @@
 # TerminalWorld
 
-**A neural world model for terminal agent training.**
+**A world model for terminal agent training.**
 
 TerminalWorld is an experimental research thread under the [Marin](https://github.com/marin-community/marin)
 project. The motivating question:
 
 > Can we replace the (slow, expensive) Docker-per-rollout regime that powers
-> today's terminal-agent training with a *learned* simulator — a neural network
+> today's terminal-agent training with a *learned* simulator — a model
 > trained to emit the bytes a real shell would emit?
 
 Tracking issue: [marin-community/marin#5866](https://github.com/marin-community/marin/issues/5866).
@@ -18,7 +18,7 @@ We train a small terminal simulator on the user turns of the
 then SFT Qwen3-8B three ways — (1) on the raw corpus, (2) on the same corpus
 with user-turn masking to reproduce
 [Dimitris Papailiopoulos's ECHO](https://x.com/DimitrisPapail/status/2056368948870811746)
-finding, and (3) on rollouts against the *neural* terminal. The three are
+finding, and (3) on rollouts against the *learned* terminal. The three are
 compared on [Terminal-Bench](https://www.tbench.ai/).
 
 ## What lives here
