@@ -118,6 +118,24 @@ Every one of these is load-bearing — without any of them arm (a) gets 0% on th
 
 Once we have (b) and (c) numbers at 10K we'll know whether the simulator path is worth scaling; if it is, the natural next step is the 100K cell, then the move to NemotronTerminal + Terminal-Bench 2.0 (Phase 1).
 
+### Status (2026-05-20)
+
+Phase 0 is partially executed and currently paused for inspection rather than wrapped with numbers. Honest accounting:
+
+- **Arm (a) baseline** — intact, unchanged from [#5611](https://github.com/marin-community/marin/issues/5611#issuecomment-4440640008): **7 / 9 / 11** pass@1 at 10K / 100K / 1M on the 100-task SWE-bench Verified slice.
+- **Arm (b) SFT checkpoint** — trained successfully. Checkpoint at `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_10k_8192tokens_arch32k_echo_v5p8-8028d4/hf/step-1249`; `config.json` patched to `eos_token_id=[151643, 151645]`.
+- **TerminalWorld simulator checkpoint** — trained successfully on env-rewritten SWE-ZERO 10K. Checkpoint at `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8192tokens_arch32k_v5p8-83663d/hf/step-1249`; same eos patch applied.
+- **Arm (b) eval, env-substitution, arm (c) student SFT, arm (c) eval** — *not yet successful*. The eval (b) run + env-substitution job both produced zero GCS output across two launches (initial run had a `dirname`-based path bug; the corrected re-launch died silently and the jobs were TTL'd from the iris controller before logs could be captured). Likely candidates: a missing piece of the 6 load-bearing harness fixes from #5611 beyond the eos patch — Daytona sandbox-noise stripping, `action_observation_template={{output.output}}`, `max_turns=50`, explicit `max_tokens` in litellm — any of which can drop pass@1 to 0.
+
+### Next steps
+
+1. Submit a *single* eval (b) shard interactively with live log streaming, identify the missing recipe piece, then re-fire the full 10-shard arm (b) eval.
+2. Re-run env-substitution against the trained simulator once the recipe is verified; submit arm (c) student SFT on the substituted dataset.
+3. Eval arm (c) sequentially after eval (b) (Daytona 100-instance cap).
+4. Update this section with the three-way 10K pass@1 numbers + resolved-task breakdowns.
+
+Scripts live on the [terminalworld branch](https://github.com/AlienKevin/marin/tree/terminalworld) under `experiments/exp5611_sft_qwen3_1_7b_swe_zero_*` and `scripts/{rewrite_swe_zero_for_sim,substitute_env_with_simulator,launch_eval_arm_b}`; orchestrator script at `scripts/terminalworld_phase0_orchestrator_v2.sh` is stopped.
+
 ---
 
 ## Evaluation methods
