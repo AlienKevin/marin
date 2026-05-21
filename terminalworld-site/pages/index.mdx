@@ -130,6 +130,8 @@ Phase 0 partially settled: arm (b) eval landed and is now uploaded + qualitative
 | (b) Full-transcript SFT | assistant + user/tool (ECHO-style) | same | **3 / 100** | 5 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) |
 | (c) TW env-substituted SFT | assistant tokens only | env messages from simulator | *blocked — see below* | — | — |
 
+**100K SFT for arm (b) submitted** (2026-05-21): `/kevin/exp5611-sft-qwen3-1-7b-100k-echo`, v5p-16 us-east5, 6,250 steps (100K rows / batch 16), ~5.7 h wall expected. Tests whether the 4 pp 10K regression is capacity-bound (closes at 100K, matching arm (a) 100K's 9 / 100) or env-token contamination (persists). Same loss-mask change as the 10K run; all other hyperparameters identical to arm (a) 100K.
+
 - **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
 - **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
 
