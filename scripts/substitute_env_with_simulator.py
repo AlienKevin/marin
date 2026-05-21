@@ -40,10 +40,11 @@ import argparse
 import gzip
 import json
 import logging
-import subprocess
 import tempfile
 import time
 from pathlib import Path
+
+import fsspec
 
 from vllm import LLM, SamplingParams
 
@@ -89,22 +90,15 @@ def build_sim_input(task: str, history: list[tuple[str, str]], current_cmd: str)
 
 
 def load_shards(src_glob: str, tmp: Path) -> list[Path]:
-    listing = subprocess.run(
-        ["gcloud", "storage", "ls", src_glob],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.split()
+    fs = fsspec.filesystem("gs")
+    listing = [f"gs://{p}" for p in fs.glob(src_glob)]
     local_paths: list[Path] = []
     for src_url in listing:
         shard_name = src_url.rsplit("/", 1)[-1]
         dst = tmp / f"in_{shard_name}"
         log.info("downloading %s", src_url)
-        subprocess.run(
-            ["gcloud", "storage", "cp", src_url, str(dst)],
-            check=True,
-            capture_output=True,
-        )
+        with fs.open(src_url, "rb") as fin, open(dst, "wb") as fout:
+            fout.write(fin.read())
         local_paths.append(dst)
     return local_paths
 
@@ -159,11 +153,14 @@ def main() -> None:
         local_sim_path = args.sim_model_path
         if local_sim_path.startswith("gs://"):
             local_dir = tmp_path / "sim_checkpoint"
+            local_dir.mkdir(parents=True, exist_ok=True)
             log.info("downloading simulator checkpoint to %s", local_dir)
-            subprocess.run(
-                ["gcloud", "storage", "cp", "-r", local_sim_path, str(local_dir)],
-                check=True,
-            )
+            fs = fsspec.filesystem("gs")
+            src_strip = local_sim_path.removeprefix("gs://").rstrip("/")
+            for p in fs.ls(src_strip):
+                name = p.rsplit("/", 1)[-1]
+                with fs.open(f"gs://{p}", "rb") as fin, open(local_dir / name, "wb") as fout:
+                    fout.write(fin.read())
             local_sim_path = str(local_dir)
 
         log.info("loading simulator from %s", local_sim_path)
@@ -177,83 +174,77 @@ def main() -> None:
             max_tokens=args.max_tokens,
         )
 
-        # Download shards
-        shard_paths = load_shards(args.src_glob, tmp_path)
+        # Process shards one at a time so partial progress lands incrementally
+        # (iris TTLs long jobs ~2hr without writing terminal state).
+        fs = fsspec.filesystem("gs")
+        dst_prefix_strip = args.dst_prefix.removeprefix("gs://").rstrip("/")
 
-        # Load all rows from all shards into a single working set
-        rows: list[dict] = []
-        for sp in shard_paths:
+        shard_paths = load_shards(args.src_glob, tmp_path)
+        for sp_idx, sp in enumerate(shard_paths):
+            shard_name = sp.name.removeprefix("in_")
+            dst_url = f"{args.dst_prefix}/{shard_name}"
+            # Skip if already uploaded
+            if fs.exists(f"{dst_prefix_strip}/{shard_name}"):
+                log.info("shard %d/%d %s already uploaded, skipping", sp_idx + 1, len(shard_paths), shard_name)
+                continue
+
+            log.info("=== shard %d/%d: %s ===", sp_idx + 1, len(shard_paths), shard_name)
+            rows: list[dict] = []
             with gzip.open(sp, "rt") as fin:
                 for line in fin:
                     rows.append(json.loads(line))
-        log.info("loaded %d trajectories", len(rows))
+            log.info("loaded %d trajectories", len(rows))
 
-        # Parse trajectories
-        parsed: list[tuple[str, list[tuple[str, str]]] | None] = [parse_trajectory(r) for r in rows]
-
-        # Per-trajectory state: (task, real_cmds, predicted_envs_so_far)
-        state: list[dict] = []
-        for parse_out, row in zip(parsed, rows, strict=True):
-            if parse_out is None:
-                state.append({"valid": False})
-                continue
-            task, pairs = parse_out
-            n = min(len(pairs), args.max_turns)
-            state.append(
-                {
-                    "valid": True,
-                    "row": row,
-                    "task": task,
-                    "cmds": [c for c, _ in pairs[:n]],
-                    "predicted_envs": [],
-                }
-            )
-        n_valid = sum(1 for s in state if s["valid"])
-        log.info("valid trajectories: %d / %d", n_valid, len(state))
-
-        # Turn-by-turn batched substitution
-        for turn in range(args.max_turns):
-            active_indices: list[int] = []
-            active_inputs: list[list[dict]] = []
-            for i, s in enumerate(state):
-                if not s["valid"]:
+            parsed: list[tuple[str, list[tuple[str, str]]] | None] = [parse_trajectory(r) for r in rows]
+            state: list[dict] = []
+            for parse_out, row in zip(parsed, rows, strict=True):
+                if parse_out is None:
+                    state.append({"valid": False})
                     continue
-                if turn >= len(s["cmds"]):
-                    continue
-                history = list(zip(s["cmds"][:turn], s["predicted_envs"], strict=True))
-                msgs = build_sim_input(s["task"], history, s["cmds"][turn])
-                active_indices.append(i)
-                active_inputs.append(msgs)
-            if not active_inputs:
-                log.info("turn %d: nothing left to do", turn)
-                break
-            t0 = time.time()
-            log.info("turn %d: %d active trajectories, batched chat...", turn, len(active_inputs))
-            outputs = llm.chat(active_inputs, sampling_params=sampling_params, use_tqdm=False)
-            elapsed = time.time() - t0
-            log.info("turn %d: done in %.1fs (%.2f traj/sec)", turn, elapsed, len(active_inputs) / max(elapsed, 1e-3))
-            for idx, out in zip(active_indices, outputs, strict=True):
-                predicted = out.outputs[0].text
-                state[idx]["predicted_envs"].append(predicted)
+                task, pairs = parse_out
+                n = min(len(pairs), args.max_turns)
+                state.append(
+                    {
+                        "valid": True,
+                        "row": row,
+                        "task": task,
+                        "cmds": [c for c, _ in pairs[:n]],
+                        "predicted_envs": [],
+                    }
+                )
+            n_valid = sum(1 for s in state if s["valid"])
+            log.info("valid trajectories: %d / %d", n_valid, len(state))
 
-        # Reassemble trajectories with substituted env messages and write out
-        # per-shard so the eventual SFT step finds files in the expected layout.
-        rows_per_shard: list[list[dict]] = []
-        # Rebuild per-shard partition order matching shard_paths
-        offset = 0
-        for sp in shard_paths:
-            with gzip.open(sp, "rt") as fin:
-                n = sum(1 for _ in fin)
-            rows_per_shard.append(state[offset : offset + n])
-            offset += n
-        assert offset == len(state), f"partition mismatch: {offset} vs {len(state)}"
+            for turn in range(args.max_turns):
+                active_indices: list[int] = []
+                active_inputs: list[list[dict]] = []
+                for i, s in enumerate(state):
+                    if not s["valid"] or turn >= len(s["cmds"]):
+                        continue
+                    history = list(zip(s["cmds"][:turn], s["predicted_envs"], strict=True))
+                    msgs = build_sim_input(s["task"], history, s["cmds"][turn])
+                    active_indices.append(i)
+                    active_inputs.append(msgs)
+                if not active_inputs:
+                    log.info("turn %d: nothing left to do", turn)
+                    break
+                t0 = time.time()
+                log.info("turn %d: %d active trajectories, batched chat...", turn, len(active_inputs))
+                outputs = llm.chat(active_inputs, sampling_params=sampling_params, use_tqdm=False)
+                elapsed = time.time() - t0
+                log.info(
+                    "turn %d: done in %.1fs (%.2f traj/sec)",
+                    turn,
+                    elapsed,
+                    len(active_inputs) / max(elapsed, 1e-3),
+                )
+                for idx, out in zip(active_indices, outputs, strict=True):
+                    state[idx]["predicted_envs"].append(out.outputs[0].text)
 
-        for sp, partition in zip(shard_paths, rows_per_shard, strict=True):
-            shard_name = sp.name.removeprefix("in_")
             local_dst = tmp_path / f"out_{shard_name}"
             n_written = 0
             with gzip.open(local_dst, "wt") as fout:
-                for s in partition:
+                for s in state:
                     if not s["valid"] or not s["predicted_envs"]:
                         continue
                     original_messages = s["row"]["messages"]
@@ -271,12 +262,13 @@ def main() -> None:
                     }
                     fout.write(json.dumps(out_row, separators=(",", ":")) + "\n")
                     n_written += 1
-            dst_url = f"{args.dst_prefix}/{shard_name}"
             log.info("uploading %s (%d rows)", dst_url, n_written)
-            subprocess.run(
-                ["gcloud", "storage", "cp", str(local_dst), dst_url],
-                check=True,
-            )
+            with open(local_dst, "rb") as fin, fsspec.open(dst_url, "wb") as fout:
+                fout.write(fin.read())
+            # Free shard state before next iteration to keep memory steady.
+            del rows, parsed, state
+            sp.unlink(missing_ok=True)
+            local_dst.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
