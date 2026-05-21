@@ -120,33 +120,59 @@ Once we have (b) and (c) numbers at 10K we'll know whether the simulator path is
 
 ### Status (2026-05-21)
 
-Phase 0 partially settled: arm (b) eval landed, arm (c) blocked on inference-stack plumbing.
+Phase 0 partially settled: arm (b) eval landed and is now uploaded + qualitatively dissected. Arm (c) still blocked on inference-stack plumbing.
 
 **10K results on the 100-task SWE-bench Verified slice**
 
-| Arm | Loss mask | Eval data source | pass@1 |
-|---|---|---|---|
-| (a) Standard SFT | assistant tokens only | real SWE-ZERO trajectories | **7%** (from [#5611](https://github.com/marin-community/marin/issues/5611#issuecomment-4440640008)) |
-| (b) Full-transcript SFT | assistant + user/tool tokens (ECHO-style) | same | **2%** (2/100) |
-| (c) TW env-substituted SFT | assistant tokens only | trajectories with env messages replaced by simulator | *blocked — see below* |
+| Arm | Loss mask | Eval data | pass@1 | pass@N | HF dataset |
+|---|---|---|---|---|---|
+| (a) Standard SFT | assistant tokens only | real SWE-ZERO | **7 / 100** | 9 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) |
+| (b) Full-transcript SFT | assistant + user/tool (ECHO-style) | same | **3 / 100** | 5 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) |
+| (c) TW env-substituted SFT | assistant tokens only | env messages from simulator | *blocked — see below* | — | — |
 
-Arm (b) solved: `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Both 1-shot.
+- **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
+- **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
 
-The arm (b) result is the first concrete piece of evidence and it cuts against the ECHO hypothesis at this scale: **shifting loss budget onto env tokens — which the model never has to produce at deployment — costs 5 pp of pass@1 at 10K** (7% → 2%). Caveats: 100-task slice is noisy, single seed, 10K-row training is shallow. We should not over-read this until we have arm (c) and at least one larger data point (100K), but the direction matters because ECHO's published gains are RL-time (`L_GRPO + λ·L_env`) and the SFT-time analogue is *not* doing the same work in this regime.
+#### What (b) actually does differently — quantitative
 
-**Pipeline state**
+74 tasks both arms attempted; aggregated bash-command shares (first token after `\`\`\`bash`):
 
-- **Arm (b) SFT checkpoint** — `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_10k_8192tokens_arch32k_echo_v5p8-8028d4/hf/step-1249` (eos-patched to `[151643, 151645]`).
-- **Arm (b) eval** — 10 shards × 10 tasks each at `gs://marin-us-central2/evaluation/harbor/swebench-verified/qwen3-1.7b-swe-zero-10k-echo/mini-swe-agent-v1/run-10k-echo-diag/shard-*/results_*.json`.
-- **TerminalWorld simulator checkpoint** — `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8192tokens_arch32k_v5p8-83663d/hf/step-1249`, eos-patched.
-- **Env-substitution** — six iris launches all failed. Last two with diagnosable cause: `ModuleNotFoundError: No module named 'vllm'` (no `--extra vllm`), then `libcublas.so.* not found` (with `--extra vllm`, because the extra also pulls `triton` which transitively wants CUDA on a TPU pod). Runtime `pip install vllm-tpu` from inside the script also failed silently. The eval pipeline avoids this by routing through `marin.inference.vllm_server.VllmEnvironment`, which native-installs `vllm-tpu` alone (no triton) via Ray runtime\_env — iris doesn't have an equivalent flow today.
+| category | (a) share | (b) share |
+|---|---|---|
+| read (`grep`/`find`/`cat`/`ls`/`head`/`tail`/`awk`) | 47.7% | **68.2%** |
+| edit (`sed`/`echo`/`cp`/`mv`/`rm`/`patch`) | 20.8% | **15.2%** |
+| exec (`python`/`pytest`/`make`) | 6.4% | 3.7% |
+| comment-only line | 21.4% | 11.7% |
+
+- **Read:edit ratio per task** — median 1.20 (a) vs **1.80** (b); mean 2.78 (a) vs **7.73** (b). (b) reads ~3× more per edit.
+- **Zero-edit tasks** — (a) attempted **13 / 74** tasks without ever issuing an editing command. (b) did so on **30 / 74**. So on 40% of jointly-attempted tasks (b) burned all 50 turns exploring and never tried a fix.
+- **Empty assistant outputs** — (a) emits zero such turns. (b) emits **28** empty assistant turns across **5** tasks (the model produces literally nothing before EOS, presumably leaking the env-token "next token is observation-truncation" pattern into the assistant role at long context).
+- **Trajectory length** is *not* the explanation — both arms hit `max_turns=50` on ~85% of attempts (61 vs 64 / 74). (b) is not exploring less; it is exploring **differently** — more search, less commit.
+
+#### What (b) actually does differently — qualitative
+
+Sampled trajectories from `/tmp/qual_ab.py`; representative patterns:
+
+- `django__django-12050` ((a) solves @ 16 turns; (b) fails @ 50): (b) issued **1 sed** in 50 turns. It spent the trajectory on `find | xargs grep`, ending in repeated `python -c "from django.db.models.sql.query import resolve_lookup_value"` import attempts that failed *because the fix was never applied*.
+- `django__django-14855` ((a) solves @ 14 turns; (b) fails @ 50): (b)'s 50 turns were **47 greps, 0 seds**. The model searched the codebase non-stop, never committing.
+- `sympy__sympy-13480` ((a) solves @ 13 turns; (b) fails @ 50): **40 of (b)'s 50 bash blocks open with a `#` — comment-only lines that are no-ops**. The model produced syntactically-valid bash that did nothing.
+- `django__django-15368` (both solve): (a) solves clean at 16 turns. (b) actually applied the right edit early but then over-iterated to turn 50 and ended in a parse-error retry loop (`"Please always provide EXACTLY ONE action in triple backticks."` × 3 at the tail). Solved by reward-checker tolerance, not by clean termination.
+
+Net read: **the assistant-only-masked baseline (a) commits to fixes; the full-transcript baseline (b) prefers to keep searching**, often emits dead commands, and at long context starts emitting empties — all consistent with action-token loss share dropping from ~100% to ~32% under (b). The action policy is starved.
+
+#### Pipeline state
+
+- **(b) SFT ckpt:** `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_10k_8192tokens_arch32k_echo_v5p8-8028d4/hf/step-1249` (eos-patched).
+- **(b) eval samples:** [HF dataset](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) and raw `gs://marin-us-central2/evaluation/harbor/swebench-verified/qwen3-1.7b-swe-zero-10k-echo/mini-swe-agent-v1/run-10k-echo-diag/`.
+- **Simulator ckpt:** `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8192tokens_arch32k_v5p8-83663d/hf/step-1249`, eos-patched.
+- **Env-substitution:** six iris launches all dead. Final diagnosis is iris controller TTLs long jobs (~2 hr) without writing terminal state, so the v10 attempt with per-shard incremental writes still landed nothing. Need a different runner.
 
 ### Next steps
 
-1. **Unblock arm (c):** rewrite `scripts/substitute_env_with_simulator.py` to spawn vllm via `marin.inference.vllm_server.VllmEnvironment` (native-mode, `vllm-tpu` only) and hit it over the local OpenAI HTTP interface, mirroring how `harbor` already serves models in eval jobs. This avoids the triton/libcublas trap.
-2. Once env-sub produces the substituted dataset, run arm (c) student SFT and eval. Daytona 100-cap means eval (c) must run after eval (b) is fully off the queue.
-3. Replicate at 100K for whichever arms still look promising — 10K alone is too noisy to settle the ECHO question.
-4. If arm (c) ≥ arm (a), graduate to Phase 0.5: full closed-loop agent ↔ simulator rollout (instead of holding the agent's commands fixed at the real trajectory).
+1. **Diagnose vs. dilution** — train **(b'): weighted-token full-transcript SFT**, with env tokens down-weighted by `≈ |actions| / |envs|` per row so action-token loss share stays ~100%. If b' ≈ a, the (b) regression was pure budget dilution. If b' < a, env-token loss is actively contaminating the shared representation. One-line chat-template tweak; ~$15 of TPU time.
+2. **Unblock arm (c)** — move `scripts/substitute_env_with_simulator.py` to the Ray cluster (no iris TTL) or split into 4 per-shard iris jobs (each well within iris's window) at the cost of 4× sim-checkpoint download.
+3. **Scale up** — replicate (a) vs (b) (and ideally b') at 100K. 10K alone is too noisy to settle the ECHO question; if the gap closes at 100K, the story is "starved-policy at low data," not "ECHO doesn't transfer."
+4. If arm (c) clears (a), graduate to Phase 0.5: closed-loop agent ↔ simulator rollouts instead of holding the agent's commands fixed at the real trajectory.
 
 Scripts: `experiments/exp5611_sft_qwen3_1_7b_swe_zero_{10k_8k_echo,sim_10k_8k,10k_8k_tw_substituted}.py`, `scripts/{rewrite_swe_zero_for_sim,substitute_env_with_simulator,launch_eval_arm_b}.py`. Branch: [terminalworld](https://github.com/AlienKevin/marin/tree/terminalworld).
 
