@@ -133,6 +133,21 @@ Phase 0 partially settled: arm (b) eval landed and is now uploaded + qualitative
 - **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
 - **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
 
+#### Comparison fidelity — what is and isn't held constant
+
+Audited end-to-end. Every dimension is byte-identical except the train-time loss mask:
+
+- **same base model** Qwen3-1.7B-Base; **same raw SFT data** (`swe-zero-12m-jsonl-10k-2f328e1d`); **same shuffle seed=42**, same 10K subset, same 1 epoch / 1250 steps; **same optimizer** (LR 2e-5, cosine, warmup 0.03, min_lr_ratio 0.1, wd 0.1, max_grad_norm 30, bs 8); **same TPU resource** (v5p-8 us-east5); **same architecture `max_seq_len`** (32768 arch / 8192 data); **same eos patch**;
+- **same eval script** (`exp5611_eval_qwen3_1_7b_swe_zero_8k.py`); same vLLM engine (`max_model_len=32768`, temp 1.0, max_in 28672, max_out 4096, max_turns 50); same Harbor + mini-swe-agent v1 + daytona stack, `n_concurrent=4`; same 100-task slice;
+- **same `chat_template.jinja` exported into each checkpoint** (SHA `87a2728c…`, the upstream Qwen3 template — `{% generation %}` markers are training-time only and never reach the eval-time tokenizer);
+- the *only* intended difference is the train-time chat template: (a) uses `QWEN_3_CHAT_TEMPLATE` (`{% generation %}` around assistant only); (b) uses `QWEN_3_CHAT_TEMPLATE_FULL_TRANSCRIPT` (around user + tool + assistant). Mask coverage 17.5% → 54.4% on a synthetic example.
+
+Caveats worth surfacing — *not* confounds but worth knowing:
+
+- **Attempt counts differ:** (a) had 208 attempts over 93 tasks (~2.2/task; 3 explicit re-runs + TPU preemption retries); (b) had 109 attempts over 79 tasks (~1.4/task). Bias is in (a)'s favor for **pass@N** but **pass@1 uses latest-attempt-wins**, so this does not affect the headline.
+- **Single SFT seed at eval temp=1.0:** both arms are noisy at N=100; a ±2–3 pp per-arm wobble is plausible. The 4 pp gap is real-directional but not bulletproof. A second SFT seed (or 100K replication) is the right way to pin the effect size.
+- **(b)'s missing 21 tasks** are concentrated in django (14/35 jointly-mapped django tasks lost), so the per-repo accuracy table is most reliable for non-django repos.
+
 #### What (b) actually does differently — quantitative
 
 74 tasks both arms attempted; aggregated bash-command shares (first token after `\`\`\`bash`):
@@ -157,8 +172,9 @@ Sampled trajectories from `/tmp/qual_ab.py`; representative patterns:
 - `django__django-14855` ((a) solves @ 14 turns; (b) fails @ 50): (b)'s 50 turns were **47 greps, 0 seds**. The model searched the codebase non-stop, never committing.
 - `sympy__sympy-13480` ((a) solves @ 13 turns; (b) fails @ 50): **40 of (b)'s 50 bash blocks open with a `#` — comment-only lines that are no-ops**. The model produced syntactically-valid bash that did nothing.
 - `django__django-15368` (both solve): (a) solves clean at 16 turns. (b) actually applied the right edit early but then over-iterated to turn 50 and ended in a parse-error retry loop (`"Please always provide EXACTLY ONE action in triple backticks."` × 3 at the tail). Solved by reward-checker tolerance, not by clean termination.
+- `pytest-dev__pytest-8399` ((b)-only solve, 30 turns clean; (a) failed @ 100 across 3 attempts): the task asks to make the auto-generated unittest fixture name start with `_` to keep it hidden. (b) localized to `src/_pytest/unittest.py:147` (the line constructing `name=f"unittest_{setup_name}_fixture_..."`), made a single targeted `sed -i` swapping the `unittest_` prefix for `_`, verified, and emitted `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. (a) was pulled into the *wrong* file (`src/_pytest/runner.py`'s `tw.write(item.nodeid)` block) and spent 25 seds trying to filter fixtures by docstring presence — never found `unittest_` in `unittest.py`. **This cuts against a flat "(b) is just worse" reading**: on a literal pattern-match task, (b)'s read-heavy / commit-light style stayed close to the bug-report phrasing and won.
 
-Net read: **the assistant-only-masked baseline (a) commits to fixes; the full-transcript baseline (b) prefers to keep searching**, often emits dead commands, and at long context starts emitting empties — all consistent with action-token loss share dropping from ~100% to ~32% under (b). The action policy is starved.
+Net read: on average **the assistant-only-masked baseline (a) commits to fixes; the full-transcript baseline (b) prefers to keep searching**, often emits dead commands, and at long context starts emitting empties — all consistent with action-token loss share dropping from ~100% to ~32% under (b). But on at least one task (`pytest-8399`) the more cautious style is an asset, suggesting the env-token loss may be doing *something* useful (better grounding to instruction text?) that's being drowned by action-policy starvation on the rest. The cleanest way to settle it is the weighted-token (b') variant in the next-steps list — if b' recovers (a)'s solves *and* keeps `pytest-8399`, that's the story.
 
 #### Pipeline state
 
