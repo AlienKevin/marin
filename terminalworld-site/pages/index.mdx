@@ -122,49 +122,41 @@ Once we have (b) and (c) numbers at 10K we'll know whether the simulator path is
 
 ### Status (2026-05-21)
 
-Phase 0 partially settled: arm (b) eval landed and is now uploaded + qualitatively dissected. Arm (c) still blocked on inference-stack plumbing.
+Phase 0 partially settled: arm (b) eval landed at 10K and 100K, both with full 100/100 coverage after recovering Daytona setup failures. Arm (c) still blocked on inference-stack plumbing.
 
-**10K results on the 100-task SWE-bench Verified slice**
+**Headline — 10K and 100K, 100-task SWE-bench Verified slice (full 100/100 attempted both arms after recovery)**
 
-| Arm | Loss mask | Eval data | pass@1 | pass@N | HF dataset |
-|---|---|---|---|---|---|
-| (a) Standard SFT | assistant tokens only | real SWE-ZERO | **7 / 100** | 9 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) |
-| (b) Full-transcript SFT | assistant + user/tool (ECHO-style) | same | **3 / 100** | 5 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) |
-| (c) TW env-substituted SFT | assistant tokens only | env messages from simulator | *blocked — see below* | — | — |
-
-**100K results — partial vindication of the dilution hypothesis** (2026-05-26)
-
-| Arm | 10K pass@1 | **100K pass@1** | Δ from 10× scaling |
+| training data | (a) assistant-only | (b) full-transcript (ECHO-style) | gap |
 |---|---:|---:|---:|
-| (a) Standard SFT | 7 / 100 | 9 / 100 | +2 pp |
-| (b) Full-transcript SFT | 3 / 100 | **7 / 100** | **+4 pp** |
-| **(a) − (b) gap** | **4 pp** | **2 pp** | gap halved |
+| 10K SWE-ZERO | **7 / 100** | **5 / 100** | 2 pp |
+| 100K SWE-ZERO | **9 / 100** | **8 / 100** | 1 pp |
+| Δ (10K → 100K) | +2 pp | +3 pp | gap narrows 2 → 1 pp |
 
-Arm (b)'s 4 pp 10K regression **halves to 2 pp at 100K**. (b) scales faster than (a) (+4 vs +2). That's the prediction the "loss-budget dilution" story makes: action-token loss share dropped from ~100% to ~32% under (b), so (b) needs proportionally more samples to get the same per-action gradient signal — once you give it that data, the gap shrinks. The residual 2 pp at 100K is consistent with some env-token contamination on top, but the contamination component is small. **ECHO-style unmasking at SFT-time isn't categorically broken, it's data-hungry.**
+The gap is small at both scales and gets smaller with data. The "(b) ECHO-style unmasking is categorically worse" reading is **not supported by the data once coverage is clean** — both arms scale similarly and the gap at 100K is within single-SFT-seed noise at N=100. HF datasets: [arm (a) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval), [arm (b) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval), [arm (a) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval), [arm (b) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval).
 
-Arm (b) 100K pass@1 solves: `django__django-{12050, 13109, 13363, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`. (b) 100K **recovers three of the "starved policy" django tasks it lost at 10K** (12050, 13109, 15467) plus picks up two new django solves and a new pytest. The action policy is back in business once data scales. HF dataset: [SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval). Coverage caveat: 82/100 tasks attempted (18 Daytona-side setup failures); same fixed cost as the 10K run.
+> **Note on a prior, inflated gap.** Earlier versions of this page reported the 10K gap as 4 pp (7 vs 3) and the 100K gap as 2 pp (9 vs 7). Those numbers came from an aggregator that walked harbor trial directories with disk-mtime as the "latest attempt" tiebreaker — but `gcloud storage rsync` flattens mtimes, so the tiebreaker was effectively random whenever a task had multiple attempts (which the shard-03/04 reruns + Daytona retries produced often). After re-aggregating from `samples_*.jsonl` with the per-sample timestamp field — which is deterministic — and after re-firing the missing tasks so coverage is 100/100, the actual numbers are 5 and 8, gaps 2 pp and 1 pp.
 
-Arm (a) 100K trajectories are also on HF ([SWE-ZERO-100K-Qwen3-1.7B-Base-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval)), so we re-ran the full (a) vs (b) behavioral comparison at 100K — 76 jointly-attempted tasks. **Every behavioral asymmetry I flagged at 10K either disappears or shrinks at 100K**:
+**(b) 10K pass@1 solves:** `django__django-{14855, 15368, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Three are shared with (a); two are (b)-unique at this scale.
+**(b) 100K pass@1 solves:** `django__django-{12050, 13109, 13363, 14855, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`. Six shared with (a), two (b)-unique.
 
-| metric | 10K (a / b) | 100K (a / b) | what happened |
-|---|---|---|---|
-| pass@1 (both-attempted denom) | 9.5% / 4.1% | 10.5% / **9.2%** | gap 5.4 → **1.3 pp** |
-| read share | 47.7% / **68.2%** | 40.1% / **48.5%** | (b)'s read-heaviness halves |
-| edit share | 20.8% / 15.2% | 26.4% / 21.5% | (b) catches up |
-| zero-edit tasks | 13 / **30** | 5 / **8** | "never commits" drops ~4× |
-| median read:edit | 1.20 / 1.80 | 1.67 / **1.79** | now indistinguishable |
-| empty assistant turns | 0 / **28** | **0 / 0** | **pathology fully gone** |
-| clean submits | 14 / 10 | 26 / 17 | (b) still terminates worse, but both improve |
+**Re-running the trajectory comparison with corrected (b) data** (76 / 91 jointly-attempted tasks):
 
-The "starved policy" reading from 10K — empty outputs leaking env-token end-of-message patterns, refusing to commit edits, looping on search — is largely a **low-data artifact**. The action policy is healthy at 100K. Two residual differences remain:
+| metric | 10K (a / b) | 100K (a / b) |
+|---|---|---|
+| pass@1 (full-100 denom) | 7 / **5** | 9 / **8** |
+| pass@1 (both-attempted) | 7.5% / **5.4%** | 9.9% / **8.8%** |
+| read share | 49.1% / **67.2%** | 40.6% / **47.1%** |
+| edit share | 19.1% / 17.8% | 26.1% / 20.8% |
+| zero-edit tasks | 18 / **39** of 93 | 5 / **12** of 91 |
+| empty assistant turns | 0 / **28** | **0 / 0** |
 
-- (b) hits `max_turns=50` more often (59 vs 50 / 76) and clean-submits less (17 vs 26 / 76) — long-context termination is still slightly degraded.
-- Per-repo: (b) wins django 5–4 and pytest-dev 1–0, but loses sympy 0–3 to (a). The sympy gap is consistent across both scales.
+The pass@1 gap is genuinely small, **but the behavioral asymmetries from the earlier write-up are still there in the trajectory data:**
 
-Net read on the 10K → 100K story: **the dilution hypothesis is largely vindicated.** ECHO-style SFT-time unmasking *is* data-hungry — at 10K the action policy is starved enough that it visibly malfunctions (empty turns, zero edits, parse-error loops); at 100K most of that is fixed and the residual ~1–2 pp gap is consistent with a small amount of env-token contamination on top. The published ECHO method is RL-time, but the SFT-time analogue is salvageable with more data, contrary to the 10K-alone reading.
+- **(b) reads more, edits less.** At 10K the read share is 67% (vs 49% for a); at 100K it shrinks to 47% (vs 41%). The pattern compresses with data but doesn't vanish.
+- **(b) has more zero-edit tasks.** At 10K, 39 / 93 jointly-attempted tasks see (b) burn all 50 turns without ever issuing an editing command (vs 18 / 93 for a). At 100K, 12 vs 5.
+- **(b) emits empty assistant turns at 10K (28 across 5 tasks); zero at 100K.** That pathology *is* data-hungry and resolves with scale.
 
-- **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
-- **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
+So the right reading is: **the pass@1 numbers are barely distinguishable, but the way (b) and (a) reach those numbers differs systematically.** (b) explores more search-heavy and commits less; at low data this surfaces as outright failure modes (empty outputs, never-commit trajectories), at higher data it compresses toward (a)'s style but remains qualitatively distinct. Loss-budget dilution + a small amount of style drift is consistent with both the small headline gap and the residual behavioral differences.
 
 #### Comparison fidelity — what is and isn't held constant
 
@@ -177,37 +169,20 @@ Audited end-to-end. Every dimension is byte-identical except the train-time loss
 
 Caveats worth surfacing — *not* confounds but worth knowing:
 
-- **Attempt counts differ:** (a) had 208 attempts over 93 tasks (~2.2/task; 3 explicit re-runs + TPU preemption retries); (b) had 109 attempts over 79 tasks (~1.4/task). Bias is in (a)'s favor for **pass@N** but **pass@1 uses latest-attempt-wins**, so this does not affect the headline.
-- **Single SFT seed at eval temp=1.0:** both arms are noisy at N=100; a ±2–3 pp per-arm wobble is plausible. The 4 pp gap is real-directional but not bulletproof. A second SFT seed (or 100K replication) is the right way to pin the effect size.
-- **(b)'s missing 21 tasks** are concentrated in django (14/35 jointly-mapped django tasks lost), so the per-repo accuracy table is most reliable for non-django repos.
+- **Attempt counts still differ across arms.** (a) had 208 attempts over 93 attempted tasks at 10K (~2.2/task); (b) had 141 attempts over 100 attempted at 10K (~1.4/task) after recovery. Bias is toward (a) for **pass@N** but **pass@1 uses latest-attempt-wins by sample timestamp**, so the headline is unaffected.
+- **Single SFT seed at eval temp=1.0:** both arms are noisy at N=100; a ±2 pp per-arm wobble is plausible. The 2 pp 10K gap and 1 pp 100K gap are both inside that band, so the "(b) is worse" conclusion isn't bulletproof at this scale — both reads (true small regression, or noise-floor coincidence) are consistent with the data.
+- **Aggregation source of truth.** Numbers come from `samples_*.jsonl` files harbor writes per shard, joined on `task_id` with latest-by-`timestamp`. Trial-directory walks with disk mtime do **not** reproduce these numbers reliably (mtimes get clobbered by `gcloud storage rsync`).
 
-#### What (b) actually does differently — quantitative
+#### What (b) actually does differently — qualitative examples
 
-74 tasks both arms attempted; aggregated bash-command shares (first token after `\`\`\`bash`):
+The pass@1 gap is small but the trajectory patterns are real. Three illustrative cases from individual `(a) solves / (b) fails` task pairs (note: with stochastic decoding at temp=1.0, *some* of (b)'s attempts on these tasks succeeded, but a meaningful fraction showed the pathology below; with one trial per task at eval time, this becomes the difference between solving and not):
 
-| category | (a) share | (b) share |
-|---|---|---|
-| read (`grep`/`find`/`cat`/`ls`/`head`/`tail`/`awk`) | 47.7% | **68.2%** |
-| edit (`sed`/`echo`/`cp`/`mv`/`rm`/`patch`) | 20.8% | **15.2%** |
-| exec (`python`/`pytest`/`make`) | 6.4% | 3.7% |
-| comment-only line | 21.4% | 11.7% |
+- `django__django-12050` (canonical "doesn't commit" example): on a failed (b) attempt, the model issued **1 sed in 50 turns**, spending the trajectory on `find | xargs grep`, ending in repeated `python -c "from django.db.models.sql.query import resolve_lookup_value"` import attempts that failed *because the fix was never applied*.
+- `django__django-14855` (canonical "search-loop" example): one failed (b) attempt was **47 greps, 0 seds** across all 50 turns — the model never committed. A separate (b) attempt on the same task did succeed; (b) ends up solving this task overall.
+- `sympy__sympy-13480` (canonical "dead-command" example): one failed (b) attempt opened **40 of 50 bash blocks with a `#` comment** — syntactically valid bash that does nothing.
+- `pytest-dev__pytest-8399` ((b)-only solve, 30 turns clean): the task asks to make the auto-generated unittest fixture name start with `_`. (b) localized to `src/_pytest/unittest.py:147` (the line constructing `name=f"unittest_{setup_name}_fixture_..."`), made a single targeted `sed -i` swapping `unittest_` for `_`, verified, and emitted `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. (a) was pulled into the *wrong* file (`src/_pytest/runner.py`) and spent 25 seds on unrelated fixture-display logic. On a literal pattern-match task, (b)'s read-heavy / commit-light style stayed close to the bug-report phrasing and won.
 
-- **Read:edit ratio per task** — median 1.20 (a) vs **1.80** (b); mean 2.78 (a) vs **7.73** (b). (b) reads ~3× more per edit.
-- **Zero-edit tasks** — (a) attempted **13 / 74** tasks without ever issuing an editing command. (b) did so on **30 / 74**. So on 40% of jointly-attempted tasks (b) burned all 50 turns exploring and never tried a fix.
-- **Empty assistant outputs** — (a) emits zero such turns. (b) emits **28** empty assistant turns across **5** tasks (the model produces literally nothing before EOS, presumably leaking the env-token "next token is observation-truncation" pattern into the assistant role at long context).
-- **Trajectory length** is *not* the explanation — both arms hit `max_turns=50` on ~85% of attempts (61 vs 64 / 74). (b) is not exploring less; it is exploring **differently** — more search, less commit.
-
-#### What (b) actually does differently — qualitative
-
-Sampled trajectories from `/tmp/qual_ab.py`; representative patterns:
-
-- `django__django-12050` ((a) solves @ 16 turns; (b) fails @ 50): (b) issued **1 sed** in 50 turns. It spent the trajectory on `find | xargs grep`, ending in repeated `python -c "from django.db.models.sql.query import resolve_lookup_value"` import attempts that failed *because the fix was never applied*.
-- `django__django-14855` ((a) solves @ 14 turns; (b) fails @ 50): (b)'s 50 turns were **47 greps, 0 seds**. The model searched the codebase non-stop, never committing.
-- `sympy__sympy-13480` ((a) solves @ 13 turns; (b) fails @ 50): **40 of (b)'s 50 bash blocks open with a `#` — comment-only lines that are no-ops**. The model produced syntactically-valid bash that did nothing.
-- `django__django-15368` (both solve): (a) solves clean at 16 turns. (b) actually applied the right edit early but then over-iterated to turn 50 and ended in a parse-error retry loop (`"Please always provide EXACTLY ONE action in triple backticks."` × 3 at the tail). Solved by reward-checker tolerance, not by clean termination.
-- `pytest-dev__pytest-8399` ((b)-only solve, 30 turns clean; (a) failed @ 100 across 3 attempts): the task asks to make the auto-generated unittest fixture name start with `_` to keep it hidden. (b) localized to `src/_pytest/unittest.py:147` (the line constructing `name=f"unittest_{setup_name}_fixture_..."`), made a single targeted `sed -i` swapping the `unittest_` prefix for `_`, verified, and emitted `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. (a) was pulled into the *wrong* file (`src/_pytest/runner.py`'s `tw.write(item.nodeid)` block) and spent 25 seds trying to filter fixtures by docstring presence — never found `unittest_` in `unittest.py`. **This cuts against a flat "(b) is just worse" reading**: on a literal pattern-match task, (b)'s read-heavy / commit-light style stayed close to the bug-report phrasing and won.
-
-Net read: on average **the assistant-only-masked baseline (a) commits to fixes; the full-transcript baseline (b) prefers to keep searching**, often emits dead commands, and at long context starts emitting empties — all consistent with action-token loss share dropping from ~100% to ~32% under (b). But on at least one task (`pytest-8399`) the more cautious style is an asset, suggesting the env-token loss may be doing *something* useful (better grounding to instruction text?) that's being drowned by action-policy starvation on the rest. The cleanest way to settle it is the weighted-token (b') variant in the next-steps list — if b' recovers (a)'s solves *and* keeps `pytest-8399`, that's the story.
+Net read: **(b) and (a) reach similar pass@1 numbers via systematically different exploration strategies.** (b) is read-heavier and commits less; in the long tail this surfaces as occasional outright failure modes (the 47-grep / 40-comment / never-sed trajectories). At 100K the empty-assistant pathology that hit 28 turns at 10K is gone (0 / 0), and most of the read/edit imbalance compresses, but the qualitative tendency persists. The pytest-8399 win shows (b)'s style isn't just "worse" — it's *different*, and occasionally better.
 
 #### Pipeline state
 
@@ -218,9 +193,9 @@ Net read: on average **the assistant-only-masked baseline (a) commits to fixes; 
 
 ### Next steps
 
-1. **Diagnose vs. dilution** — train **(b'): weighted-token full-transcript SFT**, with env tokens down-weighted by `≈ |actions| / |envs|` per row so action-token loss share stays ~100%. If b' ≈ a, the (b) regression was pure budget dilution. If b' < a, env-token loss is actively contaminating the shared representation. One-line chat-template tweak; ~$15 of TPU time.
-2. **Unblock arm (c)** — move `scripts/substitute_env_with_simulator.py` to the Ray cluster (no iris TTL) or split into 4 per-shard iris jobs (each well within iris's window) at the cost of 4× sim-checkpoint download.
-3. **Scale up** — replicate (a) vs (b) (and ideally b') at 100K. 10K alone is too noisy to settle the ECHO question; if the gap closes at 100K, the story is "starved-policy at low data," not "ECHO doesn't transfer."
+1. **Pin the effect size with a second SFT seed at 10K.** Both 10K (2 pp) and 100K (1 pp) gaps sit inside the single-seed noise band. A second seed at 10K is the cheapest way to tell "small real regression" from "noise coincidence."
+2. **Diagnose vs. dilution** — train **(b'): weighted-token full-transcript SFT**, with env tokens down-weighted by `≈ |actions| / |envs|` per row so action-token loss share stays ~100%. If b' ≈ a, what we see is pure budget dilution. If b' < a, env-token loss is actively contaminating the shared representation. One-line chat-template tweak; ~$15 of TPU time.
+3. **Unblock arm (c)** — move `scripts/substitute_env_with_simulator.py` to the Ray cluster (no iris TTL) or split into 4 per-shard iris jobs (each well within iris's window) at the cost of 4× sim-checkpoint download.
 4. If arm (c) clears (a), graduate to Phase 0.5: closed-loop agent ↔ simulator rollouts instead of holding the agent's commands fixed at the real trajectory.
 
 Scripts: `experiments/exp5611_sft_qwen3_1_7b_swe_zero_{10k_8k_echo,sim_10k_8k,10k_8k_tw_substituted}.py`, `scripts/{rewrite_swe_zero_for_sim,substitute_env_with_simulator,launch_eval_arm_b}.py`. Branch: [terminalworld](https://github.com/AlienKevin/marin/tree/terminalworld).
