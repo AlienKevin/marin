@@ -130,7 +130,19 @@ Phase 0 partially settled: arm (b) eval landed and is now uploaded + qualitative
 | (b) Full-transcript SFT | assistant + user/tool (ECHO-style) | same | **3 / 100** | 5 / 100 | [SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) |
 | (c) TW env-substituted SFT | assistant tokens only | env messages from simulator | *blocked — see below* | — | — |
 
-**100K SFT for arm (b) submitted** (2026-05-21): `/kevin/exp5611-sft-qwen3-1-7b-100k-echo`, v5p-16 us-east5, 6,250 steps (100K rows / batch 16), ~5.7 h wall expected. Tests whether the 4 pp 10K regression is capacity-bound (closes at 100K, matching arm (a) 100K's 9 / 100) or env-token contamination (persists). Same loss-mask change as the 10K run; all other hyperparameters identical to arm (a) 100K.
+**100K results — partial vindication of the dilution hypothesis** (2026-05-26)
+
+| Arm | 10K pass@1 | **100K pass@1** | Δ from 10× scaling |
+|---|---:|---:|---:|
+| (a) Standard SFT | 7 / 100 | 9 / 100 | +2 pp |
+| (b) Full-transcript SFT | 3 / 100 | **7 / 100** | **+4 pp** |
+| **(a) − (b) gap** | **4 pp** | **2 pp** | gap halved |
+
+Arm (b)'s 4 pp 10K regression **halves to 2 pp at 100K**. (b) scales faster than (a) (+4 vs +2). That's the prediction the "loss-budget dilution" story makes: action-token loss share dropped from ~100% to ~32% under (b), so (b) needs proportionally more samples to get the same per-action gradient signal — once you give it that data, the gap shrinks. The residual 2 pp at 100K is consistent with some env-token contamination on top, but the contamination component is small. **ECHO-style unmasking at SFT-time isn't categorically broken, it's data-hungry.**
+
+Arm (b) 100K pass@1 solves: `django__django-{12050, 13109, 13363, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`. (b) 100K **recovers three of the "starved policy" django tasks it lost at 10K** (12050, 13109, 15467) plus picks up two new django solves and a new pytest. The action policy is back in business once data scales. HF dataset: [SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval). Coverage caveat: 82/100 tasks attempted (18 Daytona-side setup failures); same fixed cost as the 10K run.
+
+We don't have trajectory-level data for arm (a) 100K — only the headline 9/100 from [#5611](https://github.com/marin-community/marin/issues/5611) — so the (a) vs (b) read-share / edit-share / commit-rate comparison we did at 10K can't be reproduced at 100K without re-running arm (a) 100K eval. The headline is enough to validate the dilution story for now.
 
 - **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
 - **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
