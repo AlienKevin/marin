@@ -1,0 +1,85 @@
+---
+title: Phase 0 — SWE-ZERO derisk
+---
+
+# Phase 0: derisk on SWE-ZERO
+
+> **Two models, don't confuse them.** TerminalWorld involves an **agent** (the policy that issues bash commands; this is the model we benchmark) and a **simulator** (a separate model that emits terminal outputs given a command and prior session state, used as a training-time stand-in for Daytona). The arms below describe how the *agent* is trained; the simulator always uses standard assistant-only SFT.
+
+Train Qwen3-1.7B-Base on subsets of [SWE-ZERO-12M-trajectories](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-12M-trajectories), eval on the 100-task SWE-bench Verified slice from [marin#4898](https://github.com/marin-community/marin/issues/4898). SWE-ZERO is the right substrate because (1) its mini-swe-agent rollouts use a narrow, read-mostly POSIX vocabulary — small enough that simulating it is tractable; (2) arm (a) baselines already exist at three scales from [marin#5611](https://github.com/marin-community/marin/issues/5611#issuecomment-4440640008) — **10K → 7%, 100K → 9%, 1M → 11%**; (3) v5p-8 fits the 10K SFT run in ~1.5 h, so the iteration loop is cheap.
+
+## The three arms
+
+| Arm | What's varied | Training data |
+|---|---|---|
+| **(a)** Standard SFT | loss on assistant turns only | real SWE-ZERO rollouts |
+| **(b)** Full-transcript SFT (SFT-mode ECHO) | loss mask widened to user/tool turns too; same single CE, no λ | same |
+| **(c)** SFT against TerminalWorld | standard mask, env-response messages replaced by simulator predictions | SWE-ZERO with substituted env turns |
+
+> **Phase 0 simplification for (c).** Closed-loop "agent ↔ simulator" rollouts need two vLLM servers + an async driver + many hours of generation. The de-risk variant holds the agent's commands fixed at the real trajectory and only swaps env messages for simulator predictions, isolating "sim env vs real env" with no agent-distribution-shift confound. Full closed-loop is built out as [Phase 0.5](/phase-0-5) if env-substitution helps.
+
+## Recipe
+
+(a) and (b) are **byte-identical** except for the train-time chat template: shared base model, raw data (`swe-zero-12m-jsonl-10k-2f328e1d`), shuffle seed 42, optimizer (LR 2e-5, cosine, warmup 0.03, wd 0.1, bs 8), v5p-8 us-east5, arch `max_seq_len=32768`, data `max_seq_len=8192`, `eos_token_id=[151643, 151645]`. Mask coverage 17.5% (a) → 54.4% (b) on a synthetic example. Exported `chat_template.jinja` is byte-identical between checkpoints (the `{% generation %}` markers are training-time only).
+
+Six harness fixes from #5611 are load-bearing — without any of them arm (a) gets 0%:
+1. eos patch (`[151643, 151645]`) so vLLM stops on `<|im_end|>` at Qwen3 turn boundaries.
+2. Pass `max_tokens` explicitly to `litellm.completion`.
+3. SFT `model_config.max_seq_len=32768` so RoPE scales out past 8K (else `!!!` collapse).
+4. `action_observation_template = "Observation: {{output.output}}"` (default renders the dict repr).
+5. Strip Daytona's `bash: cannot set terminal process group` stderr noise.
+6. `max_turns=50`, `max_output_tokens=4096`.
+
+## Eval protocol
+
+Harbor + mini-swe-agent v1 + Daytona, 100-task slice from #5611. vLLM native on v6e-4 us-east5, `max_model_len=32768`, `tensor_parallel_size=4`, temp 1.0. Sharded 10 × 10 tasks with 4 concurrent Daytona instances per shard = 40 in-flight. Daytona's 100-instance cap means arms run sequentially, not in parallel. Pass@1 = latest trial per task, joined on `task_id` with the `timestamp` field from harbor's `samples_*.jsonl` (deterministic — disk mtime gets clobbered by `gcloud storage rsync`, don't use it).
+
+## Results (2026-05-26)
+
+Both (a) and (b) at 10K and 100K, full 100/100 task coverage after recovering Daytona setup failures.
+
+| training data | (a) assistant-only | (b) full-transcript | gap |
+|---|---:|---:|---:|
+| 10K | **7 / 100** | **5 / 100** | 2 pp |
+| 100K | **9 / 100** | **8 / 100** | 1 pp |
+| Δ from 10×data | +2 pp | +3 pp | gap narrows 2 → 1 pp |
+
+**Read:** small gap at both scales, narrowing with data; both well inside ±2 pp single-SFT-seed noise at N=100. The "ECHO-style unmasking is categorically worse" framing is not supported once coverage is clean.
+
+(b) 10K solves: `django__django-{14855, 15368, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`.
+(b) 100K solves: `django__django-{12050, 13109, 13363, 14855, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`.
+
+HF datasets: [(a) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) · [(b) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval) · [(b) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval).
+
+## Behavioral comparison
+
+The pass@1 gap is small, but the *way* (b) and (a) reach those numbers differs. Computed over jointly-attempted tasks (93 at 10K, 91 at 100K — (a) has a few Daytona setup failures of its own):
+
+| metric | 10K (a / b) | 100K (a / b) |
+|---|---|---|
+| read share (`grep`/`find`/`cat`/`ls`/...) | 49.1% / **67.2%** | 40.6% / **47.1%** |
+| edit share (`sed`/`echo`/`cp`/`patch`/...) | 19.1% / 17.8% | 26.1% / 20.8% |
+| zero-edit tasks (50 turns, no commit) | 18 / **39** of 93 | 5 / **12** of 91 |
+| empty assistant turns | 0 / **28** | **0 / 0** |
+
+(b) reads more, edits less, and at 10K occasionally emits literally nothing (the empty-turn pathology). The empty-turn pathology resolves entirely at 100K; the read/edit imbalance compresses but persists. Representative failure modes seen in individual (b) trajectories where the latest-attempt-wins tiebreak fell against (b):
+
+- `django__django-12050`: **1 sed in 50 turns**, then repeated `python -c "from ... import resolve_lookup_value"` import attempts failing because the fix was never applied.
+- `django__django-14855`: **47 greps, 0 seds** — the model searched the codebase non-stop, never committing.
+- `sympy__sympy-13480`: **40 of 50 bash blocks open with `#`** — syntactically valid no-ops.
+
+One (b)-unique win is genuinely informative: on `pytest-dev__pytest-8399` (b) made a single targeted `sed` on `src/_pytest/unittest.py:147` to swap a fixture-name prefix, while (a) was pulled into the wrong file (`src/_pytest/runner.py`) for 100 turns. On a literal pattern-match bug, (b)'s read-heavy style stayed close to the bug report and won.
+
+## Status
+
+- Arms (a) and (b) at 10K and 100K: complete, 100/100 coverage, on HF.
+- Arm (c): blocked. Simulator checkpoint trained. Six iris launches of `scripts/substitute_env_with_simulator.py` all died on the iris controller's ~2 hr TTL for long jobs; even the per-shard incremental-write version (v10) landed no output before TTL.
+
+## Next steps
+
+1. **Pin the effect size with a second SFT seed at 10K.** Both gaps are inside the single-seed noise band. A second seed is the cheapest way to tell "small real regression" from "noise coincidence."
+2. **(b'): weighted-token full-transcript SFT** — down-weight env tokens by `≈ |actions| / |envs|` so action-token loss share stays ~100%. If b' ≈ a, the (b) effect is pure budget dilution. If b' < a, env-token loss is actively contaminating the shared representation. One-line template change; ~$15 of TPU time.
+3. **Unblock arm (c)** — move env-substitution off iris (Ray cluster, or split into 4 per-shard jobs at the cost of 4× sim-ckpt download).
+4. If arm (c) clears (a), graduate to **[Phase 0.5](/phase-0-5)**: closed-loop agent ↔ simulator rollouts.
+
+Scripts on the [`terminalworld`](https://github.com/AlienKevin/marin/tree/terminalworld) branch: `experiments/exp5611_sft_qwen3_1_7b_swe_zero_{10k_8k_echo,100k_8k_echo,sim_10k_8k,10k_8k_tw_substituted}.py`, `scripts/{rewrite_swe_zero_for_sim,substitute_env_with_simulator,launch_eval_arm_b}.py`.

@@ -1,0 +1,119 @@
+---
+title: Phase 0.5 — closed-loop validation
+---
+
+# Phase 0.5 cheap validation — closed-loop agent ↔ simulator
+
+Phase 0.5 is the graduation from "hold the agent's commands fixed at real trajectory, swap env messages" (arm (c) of [Phase 0](/phase-0)) to "let the agent and simulator actually talk in real time," so the agent's distribution shift under simulated environments is finally measurable. Before booking real TPU time on a two-machine setup, two cheap probes to figure out where the actual bottleneck lives.
+
+## Free probe — does the active batch tail shrink?
+
+Going in, the bet was that batches would collapse over turn-positions as trajectories ended at different lengths, killing vLLM throughput. We can measure this for *free* by reading arm (a)'s 100 trajectories (Daytona, `max_turns=50`) and counting active trajectories at each turn-position:
+
+```
+ turn  active    frac
+    1      93    100%  ████████████████████████████████████████
+   10      93    100%  ████████████████████████████████████████
+   20      83     89%  ███████████████████████████████████
+   30      79     85%  █████████████████████████████████
+   50      78     84%  █████████████████████████████████
+```
+
+**Refuted.** 84% of arm (a) trajectories run to `max_turns=50` because the 10K model doesn't know how to clean-terminate. Active batch never drops below quarter-full. This holds for the current 10K checkpoints; once the agent learns to clean-submit (likely at 100K+), the tail *will* shrink, but for cheap Phase 0.5 validation now, batch shrinkage is not a real cost.
+
+## Paid probe — single-vllm sim latency sweep on v6e-4
+
+Two-vLLM-on-one-machine failed: `TPU_VISIBLE_CHIPS` isn't honored by vllm-tpu, the dual processes contended on chips, neither came up in 15 min. Pivoted to single-vllm sim characterization on a v6e-4 in us-east5 — driving synthetic chat requests built from real arm (a) histories at concurrency in {1,2,4,8} × turn_depth in {1,5,10,20,35}, three trials per cell. Run at `gs://marin-us-east5/sim-latency-smoke/run-1779394976/`.
+
+| concurrency | depth=1 | depth=5 | depth=10 | depth=20 | depth=35 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1.5 s | 2.0 s | **16.5 s** | **16.2 s** | 0.1 s |
+| 2 | 1.0 s | 16.7 s | 18.4 s | 18.0 s | 1.1 s |
+| 4 | 13.6 s | 15.9 s | 16.1 s | 16.0 s | 1.2 s |
+| 8 | 16.2 s | 17.0 s | 16.4 s | 16.5 s | 1.1 s |
+
+(per-cell mean wall to clear the batch, seconds)
+
+The 16-second plateau is just `max_tokens=4096 / ~256 tok/s/req` — at moderate depth the sim runs away and decode hits the cap. Throughput itself is fine: vLLM holds ~200–300 tok/s/request, ~1000 tok/s aggregate at batch=4. The bottleneck for Phase 0.5 is **simulator quality**, not serving.
+
+## The three sim pathologies (samples)
+
+Pulled actual sim outputs at depth ∈ {1,10,35}, three histories each, with `max_tokens` ∈ {4096, 512}. Run at `gs://marin-us-east5/sim-samples/run-1779415126/`. Three failure modes by context depth:
+
+### Depth 1 — basic mimicry works, but with output-length pathology
+
+`find . -path "*/models*"` returns a plausible-looking list of django paths (format correct, paths hallucinated but reasonable). A repeated `grep "resolve_lookup_value"` query loops:
+
+```
+REAL (240 chars):
+  Observation: ./django/db/models/sql/query.py:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
+               ./django/db/models/sql/query.py:        value = self.resolve_lookup_value(value, can_reuse, allow_joins, simple_col)
+
+SIM (868 chars):
+  Observation: ./django/db/models/fields/__init__.py:    def resolve_lookup_value(self, value):
+               ./django/db/models/fields/__init__.py:        return self.resolve_lookup_value(value)
+               ./django/db/models/fields/__init__.py:        return self.resolve_lookup_value(value)
+               [...same line 8 more times...]
+```
+
+`cat <large file>` devolves to pure token-repetition:
+
+```
+SIM: ...BaseBaseAdminMixin, BaseBaseBaseInline, BaseBaseBaseTabularInline,
+     BaseBaseBaseStackedInline, BaseBaseBaseModelAdmin, BaseBaseBaseAdmin,
+     BaseBaseBaseTabularAdmin, BaseBaseBaseAdminMixin, BaseBaseBaseBaseInline, ...
+```
+
+### Depth 10 — format is right, doesn't know to stop
+
+`sed -n '1053,1085p' query.py`:
+
+```
+REAL (1958 chars):  1053:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
+                    1054-        if hasattr(value, 'resolve_expression'):
+                    [...realistic numbered sed output, ends ~1958 chars...]
+
+SIM (16,535 chars): 100:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
+                    101-        if hasattr(value, 'resolve_expression'):
+                    [...identical format, keeps emitting more & more functions until max_tokens=4096 cap...]
+```
+
+Capping at `max_tokens=512` gives byte-identical content to the first 2K chars of the 4096-cap version — the runaway *is* "doesn't emit EOS," not a content-quality regression.
+
+### Depth 35 — Qwen thinking-mode tokens leak
+
+```
+REAL (84 chars):  Observation: 917:        qs = self.remote_field.model._default_manager.using(using).filter(
+
+SIM  (38 chars):  <think>
+                  
+                  </think>
+                  
+                  <think>
+                  
+                  </think>
+```
+
+That's not a terminal observation — Qwen3's thinking-mode opening tokens are being emitted as the whole response. Another deep-context example *does* eventually produce real-looking output but prefixed by `<think>...</think>`. The simulator was trained on contexts up to 8K but eval feeds it 25K+, so the base Qwen3 thinking-mode template wins at distances RoPE wasn't tuned for.
+
+## Per-turn budget projection
+
+Assuming the runaway is patched by capping inference `max_tokens` at ~512 (training-data observation length is ~200 tokens median; 512 is plenty of headroom):
+
+| component | cost |
+|---|---|
+| agent call (batch=4, from arm (a) eval) | ~3–5 s |
+| sim call (this experiment, with `max_tokens=512`) | ~2–4 s |
+| **total per turn** | **~5–9 s** |
+| (compare: agent + real Daytona) | ~7–13 s |
+
+Closed-loop is **roughly competitive with Daytona**, not 5–10× more expensive. Big win is removing the Daytona 100-instance cap. The cost is one extra TPU for the simulator.
+
+## Updated Phase 0.5 blockers
+
+Reranked after the data lands:
+
+1. **Sim quality** — the three pathologies above. Solvable: (a) cap inference `max_tokens` near training distribution; (b) ensure rewritten sim training data has `<|im_end|>` at observation boundaries; (c) retrain sim with longer-context examples or run with `enable_thinking=false` at inference.
+2. **Two-vLLM coordination** — `TPU_VISIBLE_CHIPS` isn't honored; need either two separate iris jobs (no inter-job networking today), Ray on v6e-8 with sub-meshes, or shipping the orchestrator across two v6e-4 machines.
+3. ~~Tail batch shrinkage~~ — refuted at 10K scale (will reappear when agent learns to terminate).
+4. ~~Prefill cost at long context~~ — throughput stays at ~250 tok/s across depths, not a bottleneck.

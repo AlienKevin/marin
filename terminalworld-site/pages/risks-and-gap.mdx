@@ -1,0 +1,16 @@
+---
+title: Risks & gap
+---
+
+# Known risks and prior negative results
+
+1. **Compounding error and exposure bias.** La Malfa et al. (Oxford / Turing, 2024) show that LLMs already lose accuracy on straight-line code beyond linear complexity and collapse on nested loops; later 2025/2026 work ("Demystifying Errors in LLM Reasoning Traces", "Beyond Exponential Decay") confirms error accumulation in long autoregressive traces. A terminal session is precisely a long autoregressive trace conditioned on the model's own previous (possibly wrong) outputs. [arxiv:2401.09074v2](https://arxiv.org/html/2401.09074v2)
+2. **Hallucination in computer-use world models.** R-WoM explicitly diagnoses this for OSWorld/WebArena and needed external retrieval to fix it. Pure neural terminals will likely need analogous grounding (e.g. mixing real container rollouts in periodically, à la DynaWeb's interleaving trick).
+3. **Code execution is known-hard.** CWM, despite 32B parameters and massive trace pretraining, only "early-result" simulates Python step-by-step. The shell is broader (filesystem state, processes, network, randomness) and a faithful simulator may be much harder than a faithful Python tracer.
+4. **Token-faithfulness vs semantic-faithfulness trade-off.** The proposal's own open question. WebDreamer succeeds despite natural-language-only state predictions; that suggests semantic faithfulness may suffice for downstream policy gains and tokenwise matching of `ls -la` output is overkill.
+
+---
+
+# Gap this work fills
+
+To our knowledge, **no published work has (a) trained a model end-to-end to act as a Linux terminal, nor (b) used such a learned terminal as the on-the-fly environment for SFT or RL of a coding agent.** The closest analogues are ToolEmu (LM-as-environment, but *prompted* and used for safety red-teaming, not training), Kimi K2 (production-scale evidence that simulated-environment tool-use trajectories train good agents, but the simulator stack isn't open and the shell isn't a dedicated track), CWM (trains *on* execution traces but doesn't deploy as a simulator), DynaWeb (does this for the browser), R-WoM (LLM-as-simulator for computer-use, but at the GUI level and retrieval-augmented), GenEnv (LLM-as-task-generator co-evolved with a solver), and ECHO (in-loop env-token CE — in RL it's `L_GRPO + λ · L_env`, in SFT it's just dropping the assistant-only mask; implicit world-modeling via the shared CE, but no separate simulator). TerminalWorld's three-way comparison — assistant-masked SFT vs. full-transcript SFT (ECHO-in-SFT) vs. SFT-against-a-learned-terminal — is precisely the controlled ablation the field needs to know whether a fully neural terminal gym is a viable substitute for (or accelerant of) the expensive Docker-per-rollout regime that currently dominates terminal-agent training. The Nemotron-Terminal corpus, Endless Terminals' procedural tasks, and Terminal-Bench 2.0 together make this the right moment to attempt it.
