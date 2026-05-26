@@ -142,7 +142,24 @@ Arm (b)'s 4 pp 10K regression **halves to 2 pp at 100K**. (b) scales faster than
 
 Arm (b) 100K pass@1 solves: `django__django-{12050, 13109, 13363, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`. (b) 100K **recovers three of the "starved policy" django tasks it lost at 10K** (12050, 13109, 15467) plus picks up two new django solves and a new pytest. The action policy is back in business once data scales. HF dataset: [SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval). Coverage caveat: 82/100 tasks attempted (18 Daytona-side setup failures); same fixed cost as the 10K run.
 
-We don't have trajectory-level data for arm (a) 100K — only the headline 9/100 from [#5611](https://github.com/marin-community/marin/issues/5611) — so the (a) vs (b) read-share / edit-share / commit-rate comparison we did at 10K can't be reproduced at 100K without re-running arm (a) 100K eval. The headline is enough to validate the dilution story for now.
+Arm (a) 100K trajectories are also on HF ([SWE-ZERO-100K-Qwen3-1.7B-Base-eval](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval)), so we re-ran the full (a) vs (b) behavioral comparison at 100K — 76 jointly-attempted tasks. **Every behavioral asymmetry I flagged at 10K either disappears or shrinks at 100K**:
+
+| metric | 10K (a / b) | 100K (a / b) | what happened |
+|---|---|---|---|
+| pass@1 (both-attempted denom) | 9.5% / 4.1% | 10.5% / **9.2%** | gap 5.4 → **1.3 pp** |
+| read share | 47.7% / **68.2%** | 40.1% / **48.5%** | (b)'s read-heaviness halves |
+| edit share | 20.8% / 15.2% | 26.4% / 21.5% | (b) catches up |
+| zero-edit tasks | 13 / **30** | 5 / **8** | "never commits" drops ~4× |
+| median read:edit | 1.20 / 1.80 | 1.67 / **1.79** | now indistinguishable |
+| empty assistant turns | 0 / **28** | **0 / 0** | **pathology fully gone** |
+| clean submits | 14 / 10 | 26 / 17 | (b) still terminates worse, but both improve |
+
+The "starved policy" reading from 10K — empty outputs leaking env-token end-of-message patterns, refusing to commit edits, looping on search — is largely a **low-data artifact**. The action policy is healthy at 100K. Two residual differences remain:
+
+- (b) hits `max_turns=50` more often (59 vs 50 / 76) and clean-submits less (17 vs 26 / 76) — long-context termination is still slightly degraded.
+- Per-repo: (b) wins django 5–4 and pytest-dev 1–0, but loses sympy 0–3 to (a). The sympy gap is consistent across both scales.
+
+Net read on the 10K → 100K story: **the dilution hypothesis is largely vindicated.** ECHO-style SFT-time unmasking *is* data-hungry — at 10K the action policy is starved enough that it visibly malfunctions (empty turns, zero edits, parse-error loops); at 100K most of that is fixed and the residual ~1–2 pp gap is consistent with a small amount of env-token contamination on top. The published ECHO method is RL-time, but the SFT-time analogue is salvageable with more data, contrary to the 10K-alone reading.
 
 - **Arm (b) pass@1 solves:** `django__django-15368`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Two of these are shared with (a); only `pytest-dev__pytest-8399` is a (b)-unique solve. (a) uniquely solves 5: `django__django-{12050, 13109, 14855, 15467}` and `sympy__sympy-13480`.
 - **Coverage caveat:** 79 tasks attempted in (b) vs 93 in (a); two shards' first launches died silently and the reruns under-covered. Restricted to the 74 tasks both arms attempted: (a) 7/74 (9.5%) vs (b) 3/74 (4.1%). The gap is real on apples-to-apples comparison too.
