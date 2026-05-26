@@ -139,18 +139,16 @@ The gap is small at both scales and gets smaller with data. The "(b) ECHO-style 
 **(b) 10K pass@1 solves:** `django__django-{14855, 15368, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`. Three are shared with (a); two are (b)-unique at this scale.
 **(b) 100K pass@1 solves:** `django__django-{12050, 13109, 13363, 14855, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`. Six shared with (a), two (b)-unique.
 
-**Re-running the trajectory comparison with corrected (b) data** (76 / 91 jointly-attempted tasks):
+**Behavioral comparison on jointly-attempted tasks** (need both arms' trajectories for the same task, so this is computed over 93 jointly-attempted tasks at 10K, 91 at 100K — (a) still has a few Daytona setup failures):
 
 | metric | 10K (a / b) | 100K (a / b) |
 |---|---|---|
-| pass@1 (full-100 denom) | 7 / **5** | 9 / **8** |
-| pass@1 (both-attempted) | 7.5% / **5.4%** | 9.9% / **8.8%** |
 | read share | 49.1% / **67.2%** | 40.6% / **47.1%** |
 | edit share | 19.1% / 17.8% | 26.1% / 20.8% |
 | zero-edit tasks | 18 / **39** of 93 | 5 / **12** of 91 |
 | empty assistant turns | 0 / **28** | **0 / 0** |
 
-The pass@1 gap is genuinely small, **but the behavioral asymmetries from the earlier write-up are still there in the trajectory data:**
+The pass@1 gap is small (see headline table above), **but the behavioral asymmetries are still there in the trajectory data:**
 
 - **(b) reads more, edits less.** At 10K the read share is 67% (vs 49% for a); at 100K it shrinks to 47% (vs 41%). The pattern compresses with data but doesn't vanish.
 - **(b) has more zero-edit tasks.** At 10K, 39 / 93 jointly-attempted tasks see (b) burn all 50 turns without ever issuing an editing command (vs 18 / 93 for a). At 100K, 12 vs 5.
