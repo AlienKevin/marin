@@ -7,8 +7,17 @@
 # under the 100-instance cap. Do NOT run alongside another eval — wait for this
 # to fully finish before launching arm (c).
 #
+# Cross-region egress: the eval shard itself is a CPU job, but it spawns a
+# vLLM-serving TPU via Ray + MARIN_VLLM_MODE=native. Without --region, that TPU
+# can land in any of the v6e-4 zones (europe-west4-a, us-east1-d, us-east5-b),
+# and if it lands outside us-east5 the 1.7B safetensors (~3.4 GB) get read
+# cross-region. SFT_REGION pins both the spawned TPU and (transitively) the
+# eval shard to a single GCS region; set it to the bucket region holding
+# MODEL_PATH. Default us-east5 matches the standard SFT output location.
+#
 # Usage:
 #   bash scripts/launch_eval_arm_b.sh
+#   SFT_REGION=us-central1 MODEL_PATH=gs://... bash scripts/launch_eval_arm_b.sh
 #
 # Assumes the arm (b) SFT job /kevin/exp5611-sft-qwen3-1-7b-10k-echo has
 # completed and the checkpoint exists at the expected path.
@@ -19,14 +28,17 @@ cd "$(dirname "$0")/.."
 
 # Path is derived from the SFT step name + the executor's hash suffix; verify
 # with `gcloud storage ls` before running.
-MODEL_PATH=${MODEL_PATH:-"$(gcloud storage ls 'gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_10k_8192tokens_arch32k_echo_v5p8-*/hf/step-1249' | head -1 | xargs -I{} dirname {})/step-1249"}
+MODEL_PATH=${MODEL_PATH:-"gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_10k_8192tokens_arch32k_echo_v5p8-8028d4/hf/step-1249"}
 MODEL_NAME=${MODEL_NAME:-"qwen3-1.7b-swe-zero-10k-echo"}
 HARBOR_RUN_ID=${HARBOR_RUN_ID:-"run-10k-echo"}
+# Pin TPU placement to the model's home region to avoid cross-region weight reads.
+SFT_REGION=${SFT_REGION:-"us-east5"}
 
 echo "Eval arm (b): full-transcript SFT @ 10K"
 echo "MODEL_PATH=$MODEL_PATH"
 echo "MODEL_NAME=$MODEL_NAME"
 echo "HARBOR_RUN_ID=$HARBOR_RUN_ID"
+echo "SFT_REGION=$SFT_REGION  (pins spawned vLLM TPU to this region)"
 echo ""
 
 # Split the 100 task list into 10 shards of 10.
@@ -53,6 +65,7 @@ for i in 00 01 02 03 04 05 06 07 08 09; do
     TASKS_JSON=$(cat /tmp/eval_arm_b_shard_${i}.json)
     uv run iris --config lib/iris/examples/marin.yaml job run \
         --cpu 0.5 --memory 4GB --disk 10GB \
+        --region "${SFT_REGION}" \
         --job-name "exp5611-eval-qwen3-1-7b-10k-echo-shard${i}" \
         -e DAYTONA_API_KEY "${DAYTONA_API_KEY}" \
         -e WANDB_API_KEY "${WANDB_API_KEY}" \
