@@ -34,22 +34,29 @@ Six harness fixes from #5611 are load-bearing — without any of them arm (a) ge
 
 Harbor + mini-swe-agent v1 + Daytona, 100-task slice from #5611. vLLM native on v6e-4 us-east5, `max_model_len=32768`, `tensor_parallel_size=4`, temp 1.0. Sharded 10 × 10 tasks with 4 concurrent Daytona instances per shard = 40 in-flight. Daytona's 100-instance cap means arms run sequentially, not in parallel. Pass@1 = latest trial per task, joined on `task_id` with the `timestamp` field from harbor's `samples_*.jsonl` (deterministic — disk mtime gets clobbered by `gcloud storage rsync`, don't use it).
 
-## Results (2026-05-26)
+## Results (2026-05-28)
 
-Both (a) and (b) at 10K and 100K, full 100/100 task coverage after recovering Daytona setup failures.
+All three scales now have (a) and (b) numbers on the 100-task slice.
 
 | training data | (a) assistant-only | (b) full-transcript | gap |
 |---|---:|---:|---:|
 | 10K | **7 / 100** | **5 / 100** | 2 pp |
 | 100K | **9 / 100** | **8 / 100** | 1 pp |
-| Δ from 10×data | +2 pp | +3 pp | gap narrows 2 → 1 pp |
+| **1M** | **11 / 100** | **4 / 100** | **7 pp** ← trend reverses |
 
-**Read:** small gap at both scales, narrowing with data; both well inside ±2 pp single-SFT-seed noise at N=100. The "ECHO-style unmasking is categorically worse" framing is not supported once coverage is clean.
+The 10K → 100K trend was consistent with the dilution hypothesis (gap narrowing 2 → 1 pp). **At 1M the gap widens to 7 pp** — directionally opposite. Three plausible reads:
+
+1. **Single-seed noise.** The 1M (b) run had 1 trial per task (no Daytona retries), so pass@1 = pass@N = single sample at temp=1.0. With N=100 and arms at p ≈ 0.04 vs 0.11, the gap's noise std is roughly ±4 pp, so 7 pp is ~1.75σ from zero — directional but not bulletproof. A second seed or a 3-trial re-run is the cheapest disambiguator.
+2. **Real env-token contamination at scale.** If env-token loss is teaching bad habits, more data could amplify rather than dilute. Would invert the smooth 10K → 100K trend, but the trend was based on only two points.
+3. **Hyperparameter / LR mismatch.** Same LR/schedule as arm (a) 1M, but the wider loss mask effectively trains on different gradient distributions; the optimal LR/decay for (b) might differ.
+
+**Behaviorally, (b) 1M is healthy** — 0 empty assistant turns (vs 28 at 10K), 28% clean-submit rate, read/edit/exec balance close to (a)'s (45.5% / 26.5% / 4.1%). It's not broken; it's just less effective. Whatever's happening at 1M isn't the 10K starved-policy pathology returning.
 
 (b) 10K solves: `django__django-{14855, 15368, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`.
 (b) 100K solves: `django__django-{12050, 13109, 13363, 14855, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`.
+(b) 1M solves: `django__django-{12050, 13109, 15467}`, `pydata__xarray-4629`. Overlap with (a) 1M: 3 shared, 1 (b)-unique (`django-13109`), 8 (a)-unique.
 
-HF datasets: [(a) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) · [(b) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval) · [(b) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval).
+HF datasets: [(a) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) · [(b) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval) · [(b) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 1M](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-1M-Qwen3-1.7B-Base-eval) · [(b) 1M](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-1M-Qwen3-1.7B-Base-ECHO-eval).
 
 ## Behavioral comparison
 
@@ -72,13 +79,13 @@ One (b)-unique win is genuinely informative: on `pytest-dev__pytest-8399` (b) ma
 
 ## Status
 
-- Arms (a) and (b) at 10K and 100K: complete, 100/100 coverage, on HF.
+- Arms (a) and (b) at 10K, 100K, **and 1M**: complete, on HF.
 - Arm (c): blocked. Simulator checkpoint trained. Six iris launches of `scripts/substitute_env_with_simulator.py` all died on the iris controller's ~2 hr TTL for long jobs; even the per-shard incremental-write version (v10) landed no output before TTL.
 
 ## Next steps
 
-1. **Pin the effect size with a second SFT seed at 10K.** Both gaps are inside the single-seed noise band. A second seed is the cheapest way to tell "small real regression" from "noise coincidence."
-2. **(b'): weighted-token full-transcript SFT** — down-weight env tokens by `≈ |actions| / |envs|` so action-token loss share stays ~100%. If b' ≈ a, the (b) effect is pure budget dilution. If b' < a, env-token loss is actively contaminating the shared representation. One-line template change; ~$15 of TPU time.
+1. **Pin the 1M gap with a re-eval or second SFT seed.** 7 pp at 1M is the most surprising number on the page and the noise band makes it ~1.75σ. Three options ranked by cost: (a) re-run the same eval with 3 trials per task (~$10, eliminates per-trial sampling noise); (b) train a second-seed (b) 1M and eval (~$60, the cleanest answer); (c) accept the directional finding. Worth doing (a) at minimum before drawing model conclusions.
+2. **(b'): weighted-token full-transcript SFT** — down-weight env tokens by `≈ |actions| / |envs|` so action-token loss share stays ~100%. If b' ≈ a, what we see was pure budget dilution. If b' < a (especially at 1M), env-token loss is actively contaminating the shared representation. One-line template change; ~$15 of TPU time at 10K, ~$200 at 1M.
 3. **Unblock arm (c)** — move env-substitution off iris (Ray cluster, or split into 4 per-shard jobs at the cost of 4× sim-ckpt download).
 4. If arm (c) clears (a), graduate to **[Phase 0.5](/phase-0-5)**: closed-loop agent ↔ simulator rollouts.
 
