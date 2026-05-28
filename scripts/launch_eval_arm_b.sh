@@ -33,12 +33,16 @@ MODEL_NAME=${MODEL_NAME:-"qwen3-1.7b-swe-zero-10k-echo"}
 HARBOR_RUN_ID=${HARBOR_RUN_ID:-"run-10k-echo"}
 # Pin TPU placement to the model's home region to avoid cross-region weight reads.
 SFT_REGION=${SFT_REGION:-"us-east5"}
+# Iris job-name suffix; derived from MODEL_NAME by stripping the qwen3-1.7b-... prefix
+# so the dashboard names track the model under test (e.g. "1m-echo" for the 1M echo run).
+JOB_TAG=${JOB_TAG:-"${MODEL_NAME#qwen3-1.7b-swe-zero-}"}
 
-echo "Eval arm (b): full-transcript SFT @ 10K"
+echo "Eval arm (b): full-transcript SFT"
 echo "MODEL_PATH=$MODEL_PATH"
 echo "MODEL_NAME=$MODEL_NAME"
 echo "HARBOR_RUN_ID=$HARBOR_RUN_ID"
 echo "SFT_REGION=$SFT_REGION  (pins spawned vLLM TPU to this region)"
+echo "JOB_TAG=$JOB_TAG       (used in iris job names)"
 echo ""
 
 # Split the 100 task list into 10 shards of 10.
@@ -66,7 +70,7 @@ for i in 00 01 02 03 04 05 06 07 08 09; do
     uv run iris --config lib/iris/examples/marin.yaml job run \
         --cpu 0.5 --memory 4GB --disk 10GB \
         --region "${SFT_REGION}" \
-        --job-name "exp5611-eval-qwen3-1-7b-10k-echo-shard${i}" \
+        --job-name "exp5611-eval-qwen3-1-7b-${JOB_TAG}-shard${i}" \
         -e DAYTONA_API_KEY "${DAYTONA_API_KEY}" \
         -e WANDB_API_KEY "${WANDB_API_KEY}" \
         -e WANDB_ENTITY marin-community -e WANDB_PROJECT harbor \
