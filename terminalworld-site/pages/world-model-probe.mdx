@@ -19,7 +19,7 @@ PPL on held-out env tokens (lower = better world model). Two aggregations: **tok
 
 | checkpoint | loss mask | token-weighted PPL | median per-traj PPL | mean | max (worst traj) |
 |---|---|---:|---:|---:|---:|
-| **base** Qwen3-1.7B-Base | none (pretrained) | 2.90 | 1.97 | 4.98 | 33 |
+| **base** Qwen3-1.7B-Base | none (pretrained) | 1.81 | 2.27 | 16.25 | 343 |
 | (a) 10K | assistant-only | 2.01 | 1.81 | 7.21 | 203 |
 | (a) 100K | assistant-only | 2.21 | 2.45 | 4.93 | 52 |
 | (a) 1M | assistant-only | 2.58 | **3.33** | 14.43 | 325 |
@@ -29,12 +29,13 @@ PPL on held-out env tokens (lower = better world model). Two aggregations: **tok
 
 ## Three takeaways
 
-**1. Standard SFT (a) forgets the world model *below the untrained base model*; full-transcript SFT (b) improves on it.** The base anchor makes this sharp. The pretrained Qwen3-1.7B-Base already predicts held-out terminal output at **median PPL 1.97** — it saw plenty of terminal text in pretraining. Against that anchor (median per-traj):
+**1. (a) forgets the world model with scale; (b) sharpens it — and only (b) has no catastrophic failures.** Anchor on the pretrained base (median per-traj PPL **2.27**, token-weighted **1.81** — it saw plenty of terminal text in pretraining):
 
-- (a) 10K barely beats base (1.81), then **forgets past it**: 100K → 2.45, 1M → 3.33. So scaled agent SFT makes the model a *worse* terminal predictor than the untrained model it started from.
-- (b) beats base immediately and keeps improving: 1.17 → 1.11 → 1.07 (monotone, ~2× better than base by 1M).
+- **Median (the typical observation):** (a) 10K (1.81) *beats* base, then **forgets past it** — 100K → 2.45, 1M → 3.33, both *worse* than the untrained model. (b) is ~2× better than base at every scale and still improving: 1.17 → 1.11 → 1.07.
+- **Token-weighted:** base (1.81) is already strong; **(a) is worse than base at every scale** (2.01 → 2.21 → 2.58), while (b) stays tied-or-better (1.74 → 1.79 → 1.87).
+- **The tail is the sharpest tell.** base has a heavy tail — **8 of 100** held-out trajectories score PPL > 10 (worst **343×** on `tukaani-project/xz`, dragging the mean to 16.25). (a) keeps a bad tail (4–9 such trajectories, worst 203→325). **(b) has _zero_ catastrophic trajectories at any scale** (worst ~5–8, mean ~1.5). On base's worst case (xz), (a) scores 4.4 and (b) **1.45** — both repair it, (b) best.
 
-The mechanism is catastrophic forgetting: (a)'s loss is on action tokens only, so env-token prediction is protected by nothing and erodes as the model specializes on actions over more optimizer steps — eventually dropping below the base model's incidental competence. (b) keeps env tokens in the loss, so the world model is actively maintained and sharpened. Per-trajectory, 96/100 held-out trajectories degrade under (a) from 10K→1M; (a) also develops a catastrophic tail (mean PPL 7→14, worst trajectory 203→325) that (b) never does (worst stays ~5–8). It is systematic, not outliers.
+The mechanism is catastrophic forgetting: (a)'s loss is on action tokens only, so env-token prediction is protected by nothing and erodes as the model specializes on actions over more optimizer steps. (b) keeps env tokens in the loss, so the world model is actively maintained — sharpening the median *and* erasing the catastrophic failures that base and (a) both carry. (b) beats base on **96 of 100** trajectories at 1M; it is systematic, not outliers.
 
 **2. Pass@1 and world-model PPL point in opposite directions.** From [Phase 0](/phase-0), arm (a) is the slightly *better agent* (e.g. 11 vs 4 / 100 at 1M). Here, arm (b) is the dramatically *better world model* (3× lower median env PPL at 1M). So the two arms make opposite trades: **(a) reallocates capacity to the action policy at the cost of its world model; (b) keeps a usable world model at a modest cost to the policy.** For TerminalWorld's actual goal — a model that can serve as a training environment / be used for model-based RL or planning — this is a stronger argument for ECHO-style unmasking than the pass@1 numbers ever were.
 
