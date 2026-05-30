@@ -1,8 +1,134 @@
 {
-  "models": [
-    {"key": "base", "label": "base (no SFT)", "ppl": "1.97", "color": "#6b7280", "default": false},
-    {"key": "a-1m", "label": "(a) assistant-only · 1M", "ppl": "3.33", "color": "#d97706", "default": true},
-    {"key": "b-1m", "label": "(b) full-transcript · 1M", "ppl": "1.07", "color": "#059669", "default": true}
-  ],
-  "trials": []
+ "models": [
+  {
+   "key": "base",
+   "label": "base (no SFT)",
+   "ppl": "1.97",
+   "color": "#6b7280",
+   "default": false
+  },
+  {
+   "key": "a-1m",
+   "label": "(a) assistant-only · 1M",
+   "ppl": "3.33",
+   "color": "#d97706",
+   "default": true
+  },
+  {
+   "key": "b-1m",
+   "label": "(b) full-transcript · 1M",
+   "ppl": "1.07",
+   "color": "#059669",
+   "default": true
+  }
+ ],
+ "rawHref": "/samples_15th_raw.jsonl",
+ "nTrialsTotal": 10,
+ "trials": [
+  {
+   "id": "fastify__fastify-oauth2-19",
+   "repo": "fastify/fastify-oauth2",
+   "title": "read a function body",
+   "cmd": {
+    "text": "Let me get the rest of the function to see the full context:\n\n```bash\nsed -n '53,75p' index.js\n```\n",
+    "len": 99,
+    "trunc": false
+   },
+   "real": {
+    "text": "Observation:   function startRedirectHandler (request, reply) {\n    const state = generateStateFunction()\n\n",
+    "len": 107,
+    "trunc": false
+   },
+   "cells": {
+    "base": {
+     "text": "Observation: ibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibrarie",
+     "len": 18427,
+     "trunc": true,
+     "note": "All 5 identical — emits the `Observation:` header, then loops the token “ibraries” to the 4k-token cap (18,427 chars)."
+    },
+    "a-1m": {
+     "text": "\nLet me get the complete function to understand the structure:\n\n```bash\nsed -n '53,85p' index.js\n```\n",
+     "len": 101,
+     "trunc": false,
+     "note": "All 5 nearly identical — instead of terminal output it continues *as the agent*: narrates a plan and issues a new `sed` command."
+    },
+    "b-1m": {
+     "text": "Observation:   function startRedirectHandler (request, reply) {\n    const state = generateStateFunction()\n\n",
+     "len": 107,
+     "trunc": false,
+     "note": "All 5 byte-identical to the real output (107 chars)."
+    }
+   }
+  },
+  {
+   "id": "k1low__tbls-666",
+   "repo": "k1LoW/tbls",
+   "title": "view Go config source",
+   "cmd": {
+    "text": "THOUGHT: Good, I updated the default config paths to include both `.yaml` and `.yml` extensions. Now let me check the duplicate detection logic:\n\n```bash\nsed -n '360,375p' config/config.go\n```\n",
+    "len": 193,
+    "trunc": false
+   },
+   "real": {
+    "text": "Observation: \tdefer func() {\n\t\terr = errors.WithStack(err)\n\t}()\n\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\t\tfor _, p := range DefaultConfigFilePaths {\n\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\t\tif path != \"\" {\n\t\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t\t}\n\t\t\t\tpath = \"\"\n\t\t\t}\n\t\t}\n\t}\n\tif path == \"\" {\n\t\treturn nil\n\t}\n",
+    "len": 417,
+    "trunc": false
+   },
+   "cells": {
+    "base": {
+     "text": "Observation: \ndefer func() {\n\terr = errors.WithStack(err)\n}()\n\nif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\tfor _, p := range DefaultConfigFilePaths {\n\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\tif path != \"\" {\n\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t}\n\t\t\tpath = p\n\t\t}\n\t}\n}\n\nif path == \"\" {\n\treturn nil\n}\n\nfullPath, err := filepath.Abs(path)\n.assertIn\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.",
+     "len": 22274,
+     "trunc": true,
+     "note": "All 5 identical — right Go structure, but never stops: runs to the 4k-token cap (22,274 chars vs the real 417)."
+    },
+    "a-1m": {
+     "text": "I need to be more careful with the sed command. Let me revert and do this properly by looking at the exact context:\n\n```bash\nsed -i '364,371d' config/config.go && sed -i '364i\\tfor _, p := range DefaultConfigFilePaths {\\n\\t\\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\\n\\t\\t\\tif path != \"\" {\\n\\t\\t\\t\\treturn fmt.Errorf(\"duplicate config file [%s, %s]\", path, p)\\n\\t\\t\\t}\\n\\t\\t\\tpath = p\\n\\t\\t}\\n\\t}' config/config.go\n```\n",
+     "len": 452,
+     "trunc": false,
+     "note": "All 5 continue as the agent — two variants, both diagnose the previous `sed` and issue corrective edit commands. None is terminal output."
+    },
+    "b-1m": {
+     "text": "Observation: \tdefer func() {\n\t\terr = errors.WithStack(err)\n\t}()\n\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\t\tfor _, p := range DefaultConfigFilePaths {\n\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\t\tif path != \"\" {\n\t\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t\t}\n\t\t\t\tpath = \"\"\n\t\t\t}\n\t\t}\n\t}\n\tif path == \"\" {\n\t\treturn nil\n\t}\n\n",
+     "len": 418,
+     "trunc": false,
+     "note": "All 5 reproduce the real Go source; 387–418 chars depending on where each stops."
+    }
+   }
+  },
+  {
+   "id": "gembaadvantage__uplift-375",
+   "repo": "gembaadvantage/uplift",
+   "title": "run a silent edit (no output)",
+   "cmd": {
+    "text": "THOUGHT: Now I need to update the `setupChangelogContext` function signature to include the SkipPrerelease field and pass it through properly.\n\n```bash\n# Update the setupChangelogContext function to include SkipPrerelease\nsed -i '/func setupChangelogContext(opts changelogOptions, out io.Writer) \\(*context.Context, error\\) {/c\\func setupChangelogContext(opts changelogOptions, out io.Writer) (*context.Context, error) {' cmd/uplift/changelog.go\n```\n",
+    "len": 450,
+    "trunc": false
+   },
+   "real": {
+    "text": "Observation: ",
+    "len": 13,
+    "trunc": false
+   },
+   "cells": {
+    "base": {
+     "text": "Observation: .RemoveEmptyEntries\ndrwxr-xr-x 3 root root  60 May  2 04:50 .\ndrwxr-xr-x 8 root root 440 May  2 04:50 ..\ndrwxr-xr-x 2 root root 440 May  2 04:50 uplift\n\nls: cannot access 'uplift/': No such file or directory\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections",
+     "len": 22220,
+     "trunc": true,
+     "note": "All 5 hallucinate output for a command that printed nothing — here an invented `ls -la` directory tree plus error spew (up to 22,220 chars)."
+    },
+    "a-1m": {
+     "text": "Now I need to modify the changelog task to actually filter out prerelease tags when SkipPrerelease is enabled. Looking at the code, I need to modify the logic in the `changelog.go` file to check if we should skip prerelease tags.\n\nLet me first check the current logic in the changelog task to understand where to add the filtering:\n\n```bash\n# Let me look at the part of the changelog task that handles tag processing\ngrep -n -A 20 -B 5 \"ctx.Changelog.All\" cmd/uplift/changelog.go\n```\n",
+     "len": 484,
+     "trunc": false,
+     "note": "Highly variable (4–881 chars): a stray “```” or short agent-style plans to edit the changelog — none is terminal output."
+    },
+    "b-1m": {
+     "text": "Observation: ",
+     "len": 13,
+     "trunc": false,
+     "note": "All 5 correctly predict an empty observation — the command writes a file and prints nothing."
+    }
+   }
+  }
+ ]
 }

@@ -6,8 +6,18 @@ import { SampleExplorer } from '../components/SampleExplorer'
 
 # Simulator samples — what does each model think the terminal said?
 
-The [world-model probe](/world-model-probe) measures env-token *perplexity*; this page makes it tangible. For 10 held-out trajectories from unseen repos, each model is given the first 14 (command, observation) pairs **plus the 15th command**, and asked to produce the **15th terminal observation** — sampled **5×** at the exact SWE-bench eval settings (temperature 1.0, `max_tokens=4096`). Compare each model's guesses against the real terminal output.
+The [world-model probe](/world-model-probe) measures env-token *perplexity*. This page makes those numbers tangible: instead of scoring the real observation, we **sample** it. For 10 held-out trajectories from unseen repos, each model is given the first 14 (command, observation) pairs **plus the 15th command**, and asked to produce the **15th terminal observation** — drawn **5×** at the exact SWE-bench eval settings (temperature 1.0, `max_tokens=4096`, `max_model_len=32768`). Generation is in agent framing (the observation is the next `user` turn), so these samples line up one-to-one with the PPL table.
 
-Models are scored in agent framing (observation = next user turn), so these samples line up directly with the PPL table. PPL labels below are median per-trajectory env-PPL (lower = better world model).
+## What the samples show
+
+**1. (a) doesn't simulate — it keeps *acting*.** Asked for the terminal's reply, the assistant-only 1M model continues *as the agent*: it narrates a plan and issues the **next command** (trials #1–2), or collapses to a degenerate fragment (` ``` `, `Observ`). It has no notion that the next turn belongs to the environment. This is catastrophic forgetting made visible, and exactly why its env-PPL is the worst of the three (median 3.33, *above* the untrained base).
+
+**2. (b) reproduces real output — including knowing when there is none.** The full-transcript 1M model returns faithful file contents and code, often byte-identical (trial #1 matches all 107 characters), and — the sharpest tell — predicts the **empty** observation when a command writes a file and prints nothing (trial #3), where base instead hallucinates a 22,000-character directory listing. It learned both the *format* and the *content* of being a terminal.
+
+**3. base has the format but not the control.** The pretrained model knows observations open with `Observation:` and can sometimes echo a known license header or the right code structure — its incidental world-model competence (PPL 1.97) is real. But it can't stop or stay grounded: it loops a single token (`ibraries`, `expensive`) to the token cap, or invents filesystem state that never existed. Useful-looking, unreliable.
+
+**The sampled ranking matches the scored ranking.** For *usable* simulation the order is **(b) ≪ base < (a)** at 1M — identical to the median env-PPL column. The qualitative page and the quantitative probe are two views of the same result. Arm (c) (user-only, training now) and the 10K checkpoints will be added here as they land.
+
+Pick models with the pills below; the variance note under each sample summarizes how the other 4 draws behaved.
 
 <SampleExplorer />

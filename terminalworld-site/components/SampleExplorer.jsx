@@ -23,16 +23,25 @@ const LABEL = {
   marginBottom: 4,
 }
 
-function Term({ text, accent, maxHeight = 260 }) {
+// `field` is { text, len, trunc }
+function Term({ field, accent, maxHeight = 300 }) {
+  const empty = !field.text || field.text.length === 0
   return (
-    <pre style={{ ...TERM, maxHeight, borderLeft: accent ? `3px solid ${accent}` : 'none' }}>
-      {text && text.length ? text : '(empty output)'}
-    </pre>
+    <div>
+      <pre style={{ ...TERM, maxHeight, borderLeft: accent ? `3px solid ${accent}` : 'none' }}>
+        {empty ? '(empty output)' : field.text}
+        {field.trunc && (
+          <span style={{ opacity: 0.5 }}>
+            {'\n'}… truncated for display — full sample is {field.len.toLocaleString()} chars
+          </span>
+        )}
+      </pre>
+    </div>
   )
 }
 
 export function SampleExplorer() {
-  const { models, trials } = data
+  const { models, trials, rawHref, nTrialsTotal } = data
   const [sel, setSel] = useState(() => {
     const d = models.filter((m) => m.default).map((m) => m.key)
     return (d.length ? d : models.map((m) => m.key)).slice(0, 2)
@@ -41,7 +50,9 @@ export function SampleExplorer() {
   const toggle = (k) =>
     setSel((prev) =>
       prev.includes(k)
-        ? prev.filter((x) => x !== k)
+        ? prev.length === 1
+          ? prev // keep at least one selected
+          : prev.filter((x) => x !== k)
         : prev.length >= 2
         ? [prev[prev.length - 1], k]
         : [...prev, k]
@@ -73,7 +84,7 @@ export function SampleExplorer() {
         }}
       >
         <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 8 }}>
-          Select 1–2 models to compare (median env-PPL shown):
+          Pick 1–2 models to compare (number = median held-out env-PPL, lower is better):
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {models.map((m) => {
@@ -135,19 +146,19 @@ export function SampleExplorer() {
             }}
           >
             <strong style={{ fontSize: 15 }}>
-              #{i + 1} · {t.repo}
+              #{i + 1} · {t.repo} <span style={{ fontWeight: 400, opacity: 0.7 }}>— {t.title}</span>
             </strong>
             <code style={{ fontSize: 11, opacity: 0.6 }}>{t.id}</code>
           </div>
 
-          <div style={LABEL}>15th command (the input — same for every model)</div>
-          <Term text={t.cmd} maxHeight={130} />
+          <div style={LABEL}>15th command (the input — identical for every model)</div>
+          <Term field={t.cmd} maxHeight={130} />
 
           <div style={{ height: 12 }} />
           <div style={{ ...LABEL, color: '#059669', fontWeight: 700, opacity: 1 }}>
-            ✓ ground truth — real terminal output · {t.real.length} chars
+            ✓ ground truth — real terminal output · {t.real.len.toLocaleString()} chars
           </div>
-          <Term text={t.real} accent="#059669" />
+          <Term field={t.real} accent="#059669" />
 
           <div style={{ height: 16 }} />
           <div
@@ -157,29 +168,48 @@ export function SampleExplorer() {
               gap: 14,
             }}
           >
-            {selModels.map((m) => (
-              <div key={m.key} style={{ minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 99, background: m.color }} />
-                  <strong style={{ fontSize: 13 }}>{m.label}</strong>
-                  <span style={{ fontSize: 11, opacity: 0.6 }}>· PPL {m.ppl}</span>
-                </div>
-                {(t.samples[m.key] || []).map((s, j) => (
-                  <div key={j} style={{ marginBottom: 9 }}>
-                    <div style={{ ...LABEL, marginBottom: 3 }}>
-                      sample {j + 1} · {s.length} ch
-                    </div>
-                    <Term text={s} accent={m.color} maxHeight={220} />
+            {selModels.map((m) => {
+              const cell = t.cells[m.key]
+              return (
+                <div key={m.key} style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 99, background: m.color }} />
+                    <strong style={{ fontSize: 13 }}>{m.label}</strong>
+                    <span style={{ fontSize: 11, opacity: 0.6 }}>· env-PPL {m.ppl}</span>
                   </div>
-                ))}
-                {!t.samples[m.key] && (
-                  <div style={{ opacity: 0.5, fontSize: 12 }}>no samples for this model</div>
-                )}
-              </div>
-            ))}
+                  <div style={{ ...LABEL, marginBottom: 3 }}>
+                    representative sample · {cell.len.toLocaleString()} chars
+                  </div>
+                  <Term field={cell} accent={m.color} maxHeight={300} />
+                  {cell.note && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        opacity: 0.8,
+                        marginTop: 7,
+                        paddingLeft: 9,
+                        borderLeft: `3px solid ${m.color}`,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      across all 5 samples: {cell.note}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       ))}
+
+      <div style={{ fontSize: 13, opacity: 0.7, marginTop: 8 }}>
+        Showing {trials.length} curated trials of {nTrialsTotal}. Every model samples the same{' '}
+        {nTrialsTotal} held-out trials (fixed seed) 5× each —{' '}
+        <a href={rawHref} download>
+          download all {nTrialsTotal} trials × 5 samples (raw JSONL)
+        </a>
+        .
+      </div>
     </div>
   )
 }
