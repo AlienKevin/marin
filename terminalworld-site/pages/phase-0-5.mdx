@@ -4,7 +4,20 @@ title: Phase 0.5 — closed-loop validation
 
 # Phase 0.5 cheap validation — closed-loop agent ↔ simulator
 
-Phase 0.5 is the graduation from "hold the agent's commands fixed at real trajectory, swap env messages" (arm (c) of [Phase 0](/phase-0)) to "let the agent and simulator actually talk in real time," so the agent's distribution shift under simulated environments is finally measurable. Before booking real TPU time on a two-machine setup, two cheap probes to figure out where the actual bottleneck lives.
+Phase 0.5 is the **downstream payoff** experiment: *does training an agent against the learned simulator actually produce a better agent?* This is the question the whole project exists to answer — replace the Docker container with a neural net during training. Two stages of increasing ambition:
+
+1. **Static env-substitution** (offline): hold the agent's commands fixed at the real SWE-ZERO trajectory and replace only the env-response messages with the simulator's predictions, then SFT an agent on the substituted data and eval pass@1. Isolates "sim env vs real env" with no agent-distribution-shift confound. *(This was "arm (c)" in earlier versions of [Phase 0](/phase-0) before that slot was reassigned to the user-only loss mask.)*
+2. **Closed-loop** (online): let the agent and simulator talk in real time, so the agent's distribution shift under simulated environments is finally exercised.
+
+The simulator is either the [dedicated env-rewritten simulator](/world-model-probe) or the new [(c) user-only model](/phase-0); the [world-model probe](/world-model-probe) is what tells us a 1.7B simulator is even good enough to try this.
+
+### Stage 1 status — static env-substitution (blocked on infra)
+
+The env-substitution job ([`scripts/substitute_env_with_simulator.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/substitute_env_with_simulator.py)) regenerates every env message in the 10K trajectories with the simulator, then [`…_10k_8k_tw_substituted.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_10k_8k_tw_substituted.py) trains an agent on it. Six iris launches all died on the controller's ~2 hr TTL for long jobs — even a per-shard incremental-write version landed no output before TTL. Needs a different runner (Ray cluster, or per-shard splits within the iris window). The simulator-quality findings below are the prerequisite that justifies finishing it.
+
+### Where's the bottleneck? Two cheap probes
+
+Before booking real TPU time on the two-machine closed-loop setup, two cheap probes to find the actual bottleneck.
 
 ## Free probe — does the active batch tail shrink?
 
