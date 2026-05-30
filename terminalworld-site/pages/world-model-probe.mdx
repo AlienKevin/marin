@@ -26,7 +26,6 @@ PPL on held-out env tokens (lower = better world model). Two aggregations: **tok
 | (b) 10K | full-transcript | 1.74 | 1.17 | 1.54 | 5.1 |
 | (b) 100K | full-transcript | 1.79 | 1.11 | 1.55 | 5.3 |
 | (b) 1M | full-transcript | 1.87 | **1.07** | 1.59 | 7.9 |
-| dedicated simulator (10K) | sim-rewritten | 1.79 | 2.00 | 2.01 | 5.2 |
 
 ## Three takeaways
 
@@ -39,7 +38,7 @@ The mechanism is catastrophic forgetting: (a)'s loss is on action tokens only, s
 
 **2. Pass@1 and world-model PPL point in opposite directions.** From [Phase 0](/phase-0), arm (a) is the slightly *better agent* (e.g. 11 vs 4 / 100 at 1M). Here, arm (b) is the dramatically *better world model* (3× lower median env PPL at 1M). So the two arms make opposite trades: **(a) reallocates capacity to the action policy at the cost of its world model; (b) keeps a usable world model at a modest cost to the policy.** For TerminalWorld's actual goal — a model that can serve as a training environment / be used for model-based RL or planning — this is a stronger argument for ECHO-style unmasking than the pass@1 numbers ever were.
 
-**3. Full-transcript SFT matches or beats a purpose-built simulator, for free.** Arm (b) at 10K equals the dedicated simulator on the token-weighted aggregate (1.74 vs 1.79) and beats it on every per-trajectory statistic (median 1.17 vs 2.00, mean 1.54 vs 2.01, worst 5.1 vs 5.2). So simply not masking env tokens during ordinary agent SFT buys you a terminal model at least as good as one trained explicitly for the job — without arm (c)'s env-substitution/rewrite pipeline. **Caveat:** the two are scored in their *native* framings — (b) with the observation in the `user` role (agent format), the simulator with it in the `assistant` role (sim-rewritten format) — so part of the gap could be framing rather than quality. The clean apples-to-apples test is a **user-only loss mask on the same agent-format data** (see [next steps](#next-steps)); that isolates the mask from the format and would confirm whether the rewrite pipeline buys anything at all.
+**3. The pure-simulator point is arm (c) (training now).** This row previously carried a *dedicated* simulator trained on env-rewritten data (token-weighted PPL 1.79). It's been dropped from the table because it isn't apples-to-apples: that model was trained and scored in a different framing (observation in the `assistant` role) than (a)/(b) (observation in the `user` role), so any gap conflates the loss mask with the format. The clean replacement is **[arm (c)](/phase-0) — a user-only loss mask on the same agent-format data**, identical to (a)/(b) except for which tokens get loss. It is training now; its env-PPL will slot into this table as the true pure-world-model point (predicted ≤ (b)).
 
 ## Nuance: (b)'s token-weighted PPL rises slightly — why?
 
