@@ -1,0 +1,61 @@
+---
+title: World-model probe (env-token PPL)
+---
+
+# World-model probe — does full-transcript SFT build a better terminal model?
+
+[Phase 0](/phase-0) measures the **agent** (pass@1). This probe measures the **world model**: how well each checkpoint predicts terminal output it has never been trained to generate. The two questions turn out to point in opposite directions, which is the most interesting result in the project so far.
+
+## Setup
+
+- **Held-out set:** 100 SWE-ZERO trajectories from **100 unseen repos** (zero repo overlap and zero instance-id overlap with the 1M training subset). Sampled from the full 12M-trajectory corpus.
+- **Task:** precondition on the first **14 (command, observation) pairs + the 15th command**, then score the perplexity of the **15th observation** (the real terminal output). Intuition: with 14 turns of context the repo state is heavily constrained, so this is the most determined, least-ambiguous version of "predict the next terminal output."
+- **Scoring:** teacher-forced HF forward pass, per-token NLL over the target observation only, prompts rendered with each checkpoint's own chat template (byte-identical framing to its SFT). All seven checkpoints score the same 100 targets (33,520 tokens), so only the weights differ.
+- **Note:** `vllm-tpu` (our pinned 0.13.x) does **not** implement `prompt_logprobs` — the [feature PR](https://github.com/vllm-project/tpu-inference/pull/2547) is still open — so scoring runs through transformers on CPU, not vLLM.
+
+## Headline
+
+PPL on held-out env tokens (lower = better world model). Two aggregations: **token-weighted** (every target token counts equally — dominated by long outputs) and **median per-trajectory** (the typical observation).
+
+| checkpoint | loss mask | token-weighted PPL | median per-traj PPL |
+|---|---|---:|---:|
+| (a) 10K | assistant-only | 2.01 | 1.81 |
+| (a) 100K | assistant-only | 2.21 | 2.45 |
+| (a) 1M | assistant-only | 2.58 | **3.33** |
+| (b) 10K | full-transcript | 1.74 | 1.17 |
+| (b) 100K | full-transcript | 1.79 | 1.14 |
+| (b) 1M | full-transcript | 1.87 | **1.07** |
+| dedicated simulator (10K) | sim-rewritten | 1.79 | 1.11 |
+
+*(base Qwen3-1.7B-Base reference row pending — will anchor where the curves start.)*
+
+## Three takeaways
+
+**1. Standard SFT (a) actively forgets the world model as it scales; full-transcript SFT (b) preserves and improves it.** By the typical (median) observation, (a) degrades monotonically 1.81 → 2.45 → 3.33 (worse with every 10× of data), while (b) *improves* 1.17 → 1.14 → 1.07. At 1M the gap is 3×. The mechanism is catastrophic forgetting: (a)'s loss is computed only on action tokens, so env-token prediction is protected by nothing and erodes as the model specializes on actions over more optimizer steps. (b) keeps env tokens in the loss, so the world model is actively maintained. (Per-trajectory, 96/100 held-out trajectories degrade under (a) from 10K→1M — it is systematic, not outliers.)
+
+**2. Pass@1 and world-model PPL point in opposite directions.** From [Phase 0](/phase-0), arm (a) is the slightly *better agent* (e.g. 11 vs 4 / 100 at 1M). Here, arm (b) is the dramatically *better world model* (3× lower median env PPL at 1M). So the two arms make opposite trades: **(a) reallocates capacity to the action policy at the cost of its world model; (b) keeps a usable world model at a modest cost to the policy.** For TerminalWorld's actual goal — a model that can serve as a training environment / be used for model-based RL or planning — this is a stronger argument for ECHO-style unmasking than the pass@1 numbers ever were.
+
+**3. Full-transcript SFT ≈ a purpose-built simulator, for free.** Arm (b) at 10K (median 1.17, token-weighted 1.74) matches the dedicated simulator trained on env-rewritten data (median 1.11, 1.79) — without any of arm (c)'s env-substitution pipeline. Simply not masking the env tokens during ordinary agent SFT gets you a terminal model on par with one trained explicitly for it.
+
+## Nuance: (b)'s token-weighted PPL rises slightly — why?
+
+The token-weighted column shows (b) ticking up 1.74 → 1.87 even though the median *falls*. This is a length effect, not a broad regression. Bucketing (b)'s per-trajectory change from 10K → 1M by observation length:
+
+| bucket | trajs | share of tokens | median PPL 10K→1M | mean PPL 10K→1M |
+|---|---:|---:|---:|---:|
+| short (≤30 tok) | 39 | 1% | 1.04 → 1.02 | — |
+| mid (30–200) | 25 | 7% | 1.22 → 1.13 | — |
+| long (>200) | 36 | **92%** | 1.72 → 1.72 | 1.76 → **1.98** |
+
+Short and mid outputs (the typical observation) *improve* with scale. The long bucket holds 92% of all scored tokens, so it determines the token-weighted headline — and within it the median is flat while the mean rises (heavy right tail: the worst trajectory goes 4.35 → 7.85, and ~5 trajectories account for 60% of the entire aggregate increase).
+
+The mechanism is **format generalizes, content memorizes**:
+
+- **Short outputs are format-dominated** — `Observation:` + a couple of grep hits, an exit code, a short listing. Structure is shared across all repos, so more training sharpens it and it transfers to unseen repos. These improve.
+- **Long outputs are content-dominated** — a full `cat file.py`, a long `sed` range, a test log: literal repo-specific source. This is only predictable if you've seen *that repo*. On held-out unseen repos there is nothing to ground on, and sharpening content priors toward SWE-ZERO's training repos doesn't transfer. These degrade — but it's a heavy tail of the most idiosyncratic outputs, not a uniform shift.
+
+This is an **inherent ceiling, not an objective failure**: no volume of SWE-ZERO data lets any model emit the literal contents of a file in a repo it has never seen. The only fixes are to put the real content in context (retrieval-grounding, exactly [R-WoM](/literature-review)'s move) or accept a floor on long-output fidelity for novel repos. It is the same root cause as the [Phase 0.5](/phase-0-5) simulator hallucinating plausible-but-wrong file dumps.
+
+## Artifacts
+
+Per-checkpoint scores: `gs://marin-us-east5/sim-ppl-eval/sim_ppl_*.jsonl`. Held-out set: `gs://marin-us-east5/heldout/sim_ppl_heldout_100.jsonl`. Scorer: `scripts/sim_ppl_eval_hf.py` on the [terminalworld branch](https://github.com/AlienKevin/marin/tree/terminalworld).

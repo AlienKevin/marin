@@ -17,7 +17,8 @@ A research project on whether a learned **simulator** of a Linux terminal can se
 ## Where to start
 
 - **[Literature review](/literature-review)** — prior work in four areas (neural world models, terminal agents, model-based RL for LLMs, policy↔simulator co-training).
-- **[Phase 0 — SWE-ZERO derisk](/phase-0)** — current cheap experiment: three agent-training arms compared on 100-task SWE-bench Verified. Headline: at 10K and 100K data scales, full-transcript SFT (ECHO-style unmasking) lands 1–2 pp behind standard assistant-only SFT — inside single-seed noise.
+- **[Phase 0 — SWE-ZERO derisk](/phase-0)** — three agent-training arms compared on 100-task SWE-bench Verified. Headline: standard assistant-only SFT is the slightly better *agent* (pass@1 7/9/11 at 10K/100K/1M vs full-transcript's 5/8/4).
+- **[World-model probe (env PPL)](/world-model-probe)** — but standard SFT is the *worse world model*, and gets worse with scale (it forgets terminal-output prediction), while full-transcript SFT preserves it and matches a purpose-built simulator. Pass@1 and world-model fidelity point in opposite directions.
 - **[Phase 0.5 — closed-loop validation](/phase-0-5)** — what it would actually cost to run an agent against the simulator end-to-end. Bottleneck is simulator quality, not serving throughput.
 - **[Evaluation methods](/evaluation-methods)** — the three-tier protocol (intrinsic fidelity → probe-set diagnostics → downstream Terminal-Bench 2.0 transfer) the simulator gets graded against.
 - **[Risks & gap](/risks-and-gap)** — known failure modes and what's new about this project relative to prior work.
