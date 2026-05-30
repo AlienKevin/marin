@@ -17,25 +17,29 @@ title: World-model probe (env-token PPL)
 
 PPL on held-out env tokens (lower = better world model). Two aggregations: **token-weighted** (every target token counts equally — dominated by long outputs) and **median per-trajectory** (the typical observation).
 
-| checkpoint | loss mask | token-weighted PPL | median per-traj PPL | max (worst traj) |
-|---|---|---:|---:|---:|
-| (a) 10K | assistant-only | 2.01 | 1.81 | 471 |
-| (a) 100K | assistant-only | 2.21 | 2.45 | 24.6 |
-| (a) 1M | assistant-only | 2.58 | **3.33** | 52 |
-| (b) 10K | full-transcript | 1.74 | 1.17 | 48 |
-| (b) 100K | full-transcript | 1.79 | 1.11 | 34.8 |
-| (b) 1M | full-transcript | 1.87 | **1.07** | 18.1 |
-| dedicated simulator (10K) | sim-rewritten | 1.79 | 2.00 | **8.6** |
-
-*(base Qwen3-1.7B-Base reference row pending — will anchor where the curves start.)*
+| checkpoint | loss mask | token-weighted PPL | median per-traj PPL | mean | max (worst traj) |
+|---|---|---:|---:|---:|---:|
+| **base** Qwen3-1.7B-Base | none (pretrained) | 2.90 | 1.97 | 4.98 | 33 |
+| (a) 10K | assistant-only | 2.01 | 1.81 | 7.21 | 203 |
+| (a) 100K | assistant-only | 2.21 | 2.45 | 4.93 | 52 |
+| (a) 1M | assistant-only | 2.58 | **3.33** | 14.43 | 325 |
+| (b) 10K | full-transcript | 1.74 | 1.17 | 1.54 | 5.1 |
+| (b) 100K | full-transcript | 1.79 | 1.11 | 1.55 | 5.3 |
+| (b) 1M | full-transcript | 1.87 | **1.07** | 1.59 | 7.9 |
+| dedicated simulator (10K) | sim-rewritten | 1.79 | 2.00 | 2.01 | 5.2 |
 
 ## Three takeaways
 
-**1. Standard SFT (a) actively forgets the world model as it scales; full-transcript SFT (b) preserves and improves it.** By the typical (median) observation, (a) degrades monotonically 1.81 → 2.45 → 3.33 (worse with every 10× of data), while (b) *improves* 1.17 → 1.11 → 1.07. At 1M the gap is 3×. The mechanism is catastrophic forgetting: (a)'s loss is computed only on action tokens, so env-token prediction is protected by nothing and erodes as the model specializes on actions over more optimizer steps. (b) keeps env tokens in the loss, so the world model is actively maintained. (Per-trajectory, 96/100 held-out trajectories degrade under (a) from 10K→1M — it is systematic, not outliers.)
+**1. Standard SFT (a) forgets the world model *below the untrained base model*; full-transcript SFT (b) improves on it.** The base anchor makes this sharp. The pretrained Qwen3-1.7B-Base already predicts held-out terminal output at **median PPL 1.97** — it saw plenty of terminal text in pretraining. Against that anchor (median per-traj):
+
+- (a) 10K barely beats base (1.81), then **forgets past it**: 100K → 2.45, 1M → 3.33. So scaled agent SFT makes the model a *worse* terminal predictor than the untrained model it started from.
+- (b) beats base immediately and keeps improving: 1.17 → 1.11 → 1.07 (monotone, ~2× better than base by 1M).
+
+The mechanism is catastrophic forgetting: (a)'s loss is on action tokens only, so env-token prediction is protected by nothing and erodes as the model specializes on actions over more optimizer steps — eventually dropping below the base model's incidental competence. (b) keeps env tokens in the loss, so the world model is actively maintained and sharpened. Per-trajectory, 96/100 held-out trajectories degrade under (a) from 10K→1M; (a) also develops a catastrophic tail (mean PPL 7→14, worst trajectory 203→325) that (b) never does (worst stays ~5–8). It is systematic, not outliers.
 
 **2. Pass@1 and world-model PPL point in opposite directions.** From [Phase 0](/phase-0), arm (a) is the slightly *better agent* (e.g. 11 vs 4 / 100 at 1M). Here, arm (b) is the dramatically *better world model* (3× lower median env PPL at 1M). So the two arms make opposite trades: **(a) reallocates capacity to the action policy at the cost of its world model; (b) keeps a usable world model at a modest cost to the policy.** For TerminalWorld's actual goal — a model that can serve as a training environment / be used for model-based RL or planning — this is a stronger argument for ECHO-style unmasking than the pass@1 numbers ever were.
 
-**3. Full-transcript SFT gets you a terminal model on par with a purpose-built simulator, for free.** Arm (b) at 10K and the dedicated simulator (trained on env-rewritten data) tie on the token-weighted aggregate (1.74 vs 1.79) — and they get there differently: (b) has the better *typical* observation (median 1.17 vs 2.00) while the simulator has the tighter *tail* (worst trajectory 8.6 vs 48, so it never blows up as badly). Either way, simply not masking env tokens during ordinary agent SFT buys you a terminal model competitive with one trained explicitly for the job — without arm (c)'s env-substitution pipeline. (The tail-vs-typical split is a natural target for combining the two objectives.)
+**3. Full-transcript SFT matches or beats a purpose-built simulator, for free.** Arm (b) at 10K equals the dedicated simulator on the token-weighted aggregate (1.74 vs 1.79) and beats it on every per-trajectory statistic (median 1.17 vs 2.00, mean 1.54 vs 2.01, worst 5.1 vs 5.2). So simply not masking env tokens during ordinary agent SFT buys you a terminal model at least as good as one trained explicitly for the job — without arm (c)'s env-substitution/rewrite pipeline. **Caveat:** the two are scored in their *native* framings — (b) with the observation in the `user` role (agent format), the simulator with it in the `assistant` role (sim-rewritten format) — so part of the gap could be framing rather than quality. The clean apples-to-apples test is a **user-only loss mask on the same agent-format data** (see [next steps](#next-steps)); that isolates the mask from the format and would confirm whether the rewrite pipeline buys anything at all.
 
 ## Nuance: (b)'s token-weighted PPL rises slightly — why?
 
@@ -55,6 +59,18 @@ The mechanism is **format generalizes, content memorizes**:
 - **Long outputs are content-dominated** — a full `cat file.py`, a long `sed` range, a test log: literal repo-specific source. This is only predictable if you've seen *that repo*. On held-out unseen repos there is nothing to ground on, and sharpening content priors toward SWE-ZERO's training repos doesn't transfer. These degrade — but it's a heavy tail of the most idiosyncratic outputs, not a uniform shift.
 
 This is an **inherent ceiling, not an objective failure**: no volume of SWE-ZERO data lets any model emit the literal contents of a file in a repo it has never seen. The only fixes are to put the real content in context (retrieval-grounding, exactly [R-WoM](/literature-review)'s move) or accept a floor on long-output fidelity for novel repos. It is the same root cause as the [Phase 0.5](/phase-0-5) simulator hallucinating plausible-but-wrong file dumps.
+
+## Next steps
+
+The loss mask is the clean axis to push on. Partition every non-system token: **assistant** (commands) vs **user** (task + observations). Then the three arms are an exact decomposition — (a) = assistant-only, (b) = both, and the missing third point **(c) = user-only**:
+
+| arm | loss on | trains a… |
+|---|---|---|
+| (a) | assistant | pure policy |
+| (b) | assistant + user | policy + world model |
+| **(c)** | **user** | **pure world model (simulator)** |
+
+with **(a) ⊕ (c) = (b)** exactly. (c) is a one-line chat-template change (the full-transcript template with the assistant markers removed) on the *same* agent-format data — no rewrite pipeline, no sim system prompt. It is the apples-to-apples "pure simulator" this page's takeaway 3 is missing: scored in the same agent framing as (a)/(b), it isolates the mask from the format and tests whether the dedicated simulator's rewrite buys anything. Predicted env-PPL ordering: **(c) ≤ (b) < (a)**. Note (c) is a simulator, so it is graded here (env-PPL), not on SWE-bench pass@1 (which would be ~0 — it never learns to emit commands). The env-substitution / closed-loop work that previously held the "(c)" label moves to its own [Phase 0.5](/phase-0-5) thread.
 
 ## Reproduce
 
