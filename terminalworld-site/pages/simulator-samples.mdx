@@ -1,0 +1,13 @@
+---
+title: Simulator samples (15th turn)
+---
+
+import { SampleExplorer } from '../components/SampleExplorer'
+
+# Simulator samples — what does each model think the terminal said?
+
+The [world-model probe](/world-model-probe) measures env-token *perplexity*; this page makes it tangible. For 10 held-out trajectories from unseen repos, each model is given the first 14 (command, observation) pairs **plus the 15th command**, and asked to produce the **15th terminal observation** — sampled **5×** at the exact SWE-bench eval settings (temperature 1.0, `max_tokens=4096`). Compare each model's guesses against the real terminal output.
+
+Models are scored in agent framing (observation = next user turn), so these samples line up directly with the PPL table. PPL labels below are median per-trajectory env-PPL (lower = better world model).
+
+<SampleExplorer />

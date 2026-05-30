@@ -1,0 +1,8 @@
+{
+  "models": [
+    {"key": "base", "label": "base (no SFT)", "ppl": "1.97", "color": "#6b7280", "default": false},
+    {"key": "a-1m", "label": "(a) assistant-only · 1M", "ppl": "3.33", "color": "#d97706", "default": true},
+    {"key": "b-1m", "label": "(b) full-transcript · 1M", "ppl": "1.07", "color": "#059669", "default": true}
+  ],
+  "trials": []
+}
