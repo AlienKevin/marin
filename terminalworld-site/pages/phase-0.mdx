@@ -54,7 +54,7 @@ Two consequences this grounds in data:
 
 ## Recipe
 
-(a) and (b) are **byte-identical** except for the train-time chat template: shared base model, raw data (`swe-zero-12m-jsonl-10k-2f328e1d`), shuffle seed 42, optimizer (LR 2e-5, cosine, warmup 0.03, wd 0.1, bs 8), v5p-8 us-east5, arch `max_seq_len=32768`, data `max_seq_len=8192`, `eos_token_id=[151643, 151645]`. Mask coverage 17.5% (a) → 54.4% (b) on a synthetic example. Exported `chat_template.jinja` is byte-identical between checkpoints (the `{% generation %}` markers are training-time only).
+(a) and (b) are **byte-identical** except for the train-time chat template: shared base model, raw data (`swe-zero-12m-jsonl-10k-2f328e1d`), shuffle seed 42, optimizer (LR 2e-5, cosine, warmup 0.03, wd 0.1, bs 8), v5p-8 us-east5, arch `max_seq_len=32768`, data `max_seq_len=8192`, `eos_token_id=[151643, 151645]`. (Mask coverage on a tiny synthetic example reads 17.5% (a) → 54.4% (b); on real data it is ~19% / ~92% — see the table above, the ratio is example-dependent.) Exported `chat_template.jinja` is byte-identical between checkpoints (the `{% generation %}` markers are training-time only).
 
 Six harness fixes from #5611 are load-bearing — without any of them arm (a) gets 0%:
 1. eos patch (`[151643, 151645]`) so vLLM stops on `<|im_end|>` at Qwen3 turn boundaries.
