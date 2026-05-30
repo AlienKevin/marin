@@ -24,6 +24,34 @@ with **(a) ⊕ (c) = (b)** — verified at the token level. Each is a one-line c
 
 > **Note on the old (c).** Earlier this slot was "SFT against a learned simulator" (train an agent on env-*substituted* data). That's a *downstream* experiment, not a loss-mask variant, so it has moved to [Phase 0.5](/phase-0-5).
 
+## Dataset composition
+
+Why the loss mask matters so much: in real SWE-ZERO trajectories the **terminal output dwarfs the agent's commands**. Tokenizing 2,000 trajectories from the 1M training subset (Qwen3 tokenizer, content tokens):
+
+| role | mean tok/traj | median | msgs/traj | share |
+|---|---:|---:|---:|---:|
+| system (mini-swe-agent prompt) | 645 | 645 | 1.0 | 7% |
+| **user** (task + observations) | 6,588 | 6,148 | 15.8 | **73%** |
+| assistant (commands) | 1,743 | 1,360 | 14.9 | 19% |
+
+User splits into the task (1st message, ~759 tok) and observations (~393 tok/message mean, median only 128 — a heavy right tail of large file dumps). User tokens are **~3.8× the command tokens**.
+
+That ratio sets what each loss mask actually trains on (real data, pre-8K-truncation, incl. ~4 structural delimiter tokens/message):
+
+| arm | loss covers | coverage |
+|---|---|---:|
+| (a) assistant-only | commands | **~19%** |
+| (c) user-only | task + observations | ~72% |
+| (b) full-transcript | everything but system | **~92%** |
+| system + turn delimiters | *never in loss* | ~8% |
+
+Two consequences this grounds in data:
+
+- **Why (a) forgets the world model:** it puts loss on only ~19% of content (commands) and *zero* on the 73% that is terminal output — so its env-modeling ability gets no gradient and [decays with scale](/world-model-probe).
+- **Why (b) dilutes the policy:** commands are only ~21% of (b)'s loss tokens (1,743 / (6,588+1,743)), so switching (a)→(b) cuts the per-command gradient share to about a fifth — the dilution behind (b)'s lower pass@1.
+
+(Pre-truncation: the mean trajectory is ~8,976 tokens, just over the 8,192 SFT window, so right-truncation trims the tail of longer trajectories; the in-training role ratio is similar but skews slightly toward earlier turns.)
+
 ## Recipe
 
 (a) and (b) are **byte-identical** except for the train-time chat template: shared base model, raw data (`swe-zero-12m-jsonl-10k-2f328e1d`), shuffle seed 42, optimizer (LR 2e-5, cosine, warmup 0.03, wd 0.1, bs 8), v5p-8 us-east5, arch `max_seq_len=32768`, data `max_seq_len=8192`, `eos_token_id=[151643, 151645]`. Mask coverage 17.5% (a) → 54.4% (b) on a synthetic example. Exported `chat_template.jinja` is byte-identical between checkpoints (the `{% generation %}` markers are training-time only).
