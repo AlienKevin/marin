@@ -56,6 +56,13 @@ The mechanism is **format generalizes, content memorizes**:
 
 This is an **inherent ceiling, not an objective failure**: no volume of SWE-ZERO data lets any model emit the literal contents of a file in a repo it has never seen. The only fixes are to put the real content in context (retrieval-grounding, exactly [R-WoM](/literature-review)'s move) or accept a floor on long-output fidelity for novel repos. It is the same root cause as the [Phase 0.5](/phase-0-5) simulator hallucinating plausible-but-wrong file dumps.
 
-## Artifacts
+## Reproduce
 
-Per-checkpoint scores: `gs://marin-us-east5/sim-ppl-eval/sim_ppl_*.jsonl`. Held-out set: `gs://marin-us-east5/heldout/sim_ppl_heldout_100.jsonl`. Scorer: `scripts/sim_ppl_eval_hf.py` on the [terminalworld branch](https://github.com/AlienKevin/marin/tree/terminalworld).
+Code pinned at commit [`da8d12e`](https://github.com/AlienKevin/marin/tree/da8d12e6b5a79a8186ff75104145c40a28e0ec07) on the `terminalworld` branch.
+
+1. **Build the held-out set** — [`scripts/sample_heldout_unseen_repos.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sample_heldout_unseen_repos.py): enumerates the 1M training subset's repos/instance-ids, then samples 100 trajectories (≥15 turns, distinct unseen repos) from the 12M corpus (`seed=42`). Writes `gs://marin-us-east5/heldout/sim_ppl_heldout_100.jsonl`.
+2. **Score each checkpoint** — [`scripts/sim_ppl_eval_hf.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_ppl_eval_hf.py) `--model-path <gcs-or-hf> --mode {agent,sim} [--chat-template-from <ckpt>]`. Teacher-forced HF forward pass on CPU; per-token NLL over the 15th observation only. The base model uses `--mode agent --chat-template-from` an SFT ckpt so prompts render identically.
+
+The scoring **had to** run through transformers because `vllm-tpu` (0.13.x) returns `[None]` for `prompt_logprobs` — confirmed by [`scripts/probe_vllm_logprobs.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/probe_vllm_logprobs.py); the [feature PR](https://github.com/vllm-project/tpu-inference/pull/2547) is still open. The vLLM and Levanter attempts ([`sim_ppl_eval.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_ppl_eval.py), [`sim_ppl_eval_levanter.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_ppl_eval_levanter.py)) are kept to document the dead-ends.
+
+**Artifacts:** held-out set `gs://marin-us-east5/heldout/sim_ppl_heldout_100.jsonl`; per-checkpoint scores `gs://marin-us-east5/sim-ppl-eval/sim_ppl_*.jsonl` (one row per trajectory + a summary row). Checkpoint paths: see the [Phase 0 reproduce table](/phase-0#reproduce).

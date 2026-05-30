@@ -117,3 +117,14 @@ Reranked after the data lands:
 2. **Two-vLLM coordination** — `TPU_VISIBLE_CHIPS` isn't honored; need either two separate iris jobs (no inter-job networking today), Ray on v6e-8 with sub-meshes, or shipping the orchestrator across two v6e-4 machines.
 3. ~~Tail batch shrinkage~~ — refuted at 10K scale (will reappear when agent learns to terminate).
 4. ~~Prefill cost at long context~~ — throughput stays at ~250 tok/s across depths, not a bottleneck.
+
+## Reproduce
+
+Code pinned at commit [`da8d12e`](https://github.com/AlienKevin/marin/tree/da8d12e6b5a79a8186ff75104145c40a28e0ec07) on the `terminalworld` branch. All three probes are iris jobs on a single v6e-4 (us-east5):
+
+- **Free batch-shrinkage analysis** — read directly from arm (a)'s eval trajectories ([HF dataset](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval)), no job needed.
+- **Dual-vLLM closed-loop attempt** (failed: `TPU_VISIBLE_CHIPS` not honored) — [`scripts/closed_loop_smoke.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/closed_loop_smoke.py).
+- **Single-vLLM sim latency sweep** — [`scripts/sim_latency_smoke.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_latency_smoke.py) → `gs://marin-us-east5/sim-latency-smoke/run-1779394976/`.
+- **Sim response sampling (the three pathologies)** — [`scripts/sim_sample_responses.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_sample_responses.py) → `gs://marin-us-east5/sim-samples/run-1779415126/`.
+
+Simulator checkpoint: `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8192tokens_arch32k_v5p8-83663d/hf/step-1249` (trained by [`exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8k.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8k.py)).
