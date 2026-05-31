@@ -19,7 +19,7 @@ Aggregating character-overlap to the real observation across all 10 trials (mean
 | base | 0.04 | 0/10 | 2.27 |
 | (a) assistant-only · 10K | 0.48 | 4/10 | 1.81 |
 | (b) full-transcript · 10K | 0.45 | 3/10 | 1.16 |
-| (c) user-only · 10K | 0.52 | 4/10 | … |
+| (c) user-only · 10K | 0.52 | 4/10 | **1.14** |
 | **(a) assistant-only · 1M** | **0.07** | **0/10** | 3.33 |
 | **(b) full-transcript · 1M** | **0.79** | **7/10** | 1.07 |
 
@@ -29,7 +29,7 @@ Aggregating character-overlap to the real observation across all 10 trials (mean
 
 **3. base has the format but not the control.** It knows observations open with `Observation:` and can echo a known license header, but it can't stop or stay grounded — it loops one token (`ibraries`, `expensive`) to the cap, or invents filesystem state. Its world-model competence is real but unreliable (median PPL 2.27, with a heavy tail — 17/100 held-out trajectories at PPL > 10).
 
-**(c) is the new point.** At 10K, user-only (c) is the strongest 10K arm on samples (0.52) and on the `tbls` trial reaches 0.87 — matching (b) at *1M*. Whether that lead holds rigorously waits on (c)'s env-PPL (running) and its 100K/1M checkpoints (training).
+**(c) is the new point — and the probe confirms it.** At 10K, user-only (c) is the strongest 10K arm on samples (0.52), and on the `tbls` trial reaches 0.87 — matching (b) at *1M*. The [env-PPL probe](/world-model-probe) makes it rigorous: (c) 10K scores **median 1.14**, edging (b) 10K (1.17) and far ahead of (a) 10K (1.81), with zero catastrophic trajectories. Since (a) ⊕ (c) = (b) at the token level, this pins the cause to the mask: loss on observation tokens is what builds the world model. (c) at 100K/1M is training to confirm the ordering holds with scale.
 
 Pick models with the pills below; the note under each sample summarizes how the 5 draws behaved.
 
