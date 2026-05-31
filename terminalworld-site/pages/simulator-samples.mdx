@@ -6,31 +6,21 @@ import { SampleExplorer } from '../components/SampleExplorer'
 
 # Simulator samples — what does each model think the terminal said?
 
-The [world-model probe](/world-model-probe) measures env-token *perplexity*. This page makes those numbers tangible: instead of scoring the real observation, we **sample** it. For 10 held-out trajectories from unseen repos, each model is given the first 14 (command, observation) pairs **plus the 15th command**, and asked to produce the **15th terminal observation** — drawn **5×** at the exact SWE-bench eval settings (temperature 1.0, `max_tokens=4096`, `max_model_len=32768`). Generation is in agent framing (the observation is the next `user` turn), so these samples line up one-to-one with the PPL table.
+The [world-model probe](/world-model-probe) reports one perplexity number per checkpoint. This page breaks that number open. For each held-out trajectory we give the model the first 14 (command, observation) pairs **plus the 15th command**, and ask for the **15th observation** — both *sampled* 5× (temperature 1.0, the SWE-bench decoding settings) and *scored* (teacher-forced env-PPL of the real observation). Agent framing throughout, so it lines up with the probe.
 
-Six checkpoints are sampled on the **same** 10 trials: `base`, and the three loss masks — (a) assistant-only, (b) full-transcript, (c) user-only — at 10K and (for a/b) 1M. Pick any 1–2 with the pills below.
+## The key axis: how much of the answer is already in context
 
-## The headline is *scale*, not just the mask
+A terminal observation can be one of two very different things. Sometimes it's a **re-display** of content the agent already saw — `sed -n '53,75p' index.js` after the file was `cat`'d three turns ago. Predicting that is an *in-context copy*. Other times it's **genuinely new** — a fresh `grep` hit, a test log, the first read of a file — which can only be *generated*. To separate these, every held-out target is scored for **copyable fraction**: what % of it appears verbatim (≥12-char spans) somewhere earlier in the model's context. We then stratify 49 trials across the spectrum.
 
-Aggregating character-overlap to the real observation across all 10 trials (mean over 5 draws, "faithful" = ≥ 0.8 overlap):
+**The per-bucket median env-PPL table below is the headline.** Read it left to right (easy → hard):
 
-| checkpoint | mean similarity | faithful trials | env-PPL |
-|---|---:|---:|---:|
-| base | 0.04 | 0/10 | 2.27 |
-| (a) assistant-only · 10K | 0.48 | 4/10 | 1.81 |
-| (b) full-transcript · 10K | 0.45 | 3/10 | 1.16 |
-| (c) user-only · 10K | 0.52 | 4/10 | **1.14** |
-| **(a) assistant-only · 1M** | **0.07** | **0/10** | 3.33 |
-| **(b) full-transcript · 1M** | **0.79** | **7/10** | 1.07 |
+- **Retrieval trials (≥90% copyable): every arm is ~1.0.** When the answer is in context, even (a) 1M — the worst world model overall — reproduces it fine (1.07). These trials are *not* what separates the arms.
+- **Pure-generation trials (<10% copyable): the arms split violently.** (a) 1M explodes to **≈20 PPL — worse than the untrained base** — because it has forgotten how to *be* a terminal and instead tries to act. (b)/(c) stay at ≈2.3. **This single bucket is where the entire global gap (1.07 vs 3.33) comes from.**
+- The gradient between is monotone: as less of the observation is copyable, every model degrades, but (a) degrades *catastrophically* while (b)/(c) degrade *gracefully*.
+- **Empty-output trials:** (b)/(c) (and a-1m) correctly predict a blank observation (~1.0); base hallucinates a wall of text (2.06).
 
-**1. At 1M, the masks split violently — and only this is visible in free sampling.** (a) **collapses to 0.07**: asked for the terminal's reply it continues *as the agent*, narrating a plan and issuing the next command, or emitting a degenerate fragment (` ``` `, `Observ`). It no longer knows the next turn belongs to the environment — catastrophic forgetting, made visible. (b) **sharpens to 0.79**: faithful file contents, often byte-identical (the fastify trial matches all 107 chars), and — the sharpest tell — it predicts the **empty** observation when a command prints nothing, where base hallucinates a 22,000-char directory listing.
+So "(b) is a better world model than (a)" precisely means: **on the trials that require generating unseen content, (a) collapses and (b) doesn't.** They are indistinguishable on the easy (retrieval) trials. This is the quantitative form of *format generalizes, content memorizes* — and it's why no arm, not even (b), gets the pure-generation bucket near 1.0: emitting the literal contents of a never-seen file is the inherent ceiling.
 
-**2. At 10K, sampling can't separate the masks — but the probe can.** All three 10K masks sample comparably (~0.45–0.52), yet the teacher-forced [env-PPL probe](/world-model-probe) *does* split them cleanly at 10K (b-10k **1.16** ≪ a-10k **1.81**). Temperature-1.0 sampling is simply too noisy to surface a gap this size; perplexity, which integrates over the whole distribution, is the more sensitive instrument. **The probe is the rigorous comparison; this page is the intuition for what the extremes feel like.**
-
-**3. base has the format but not the control.** It knows observations open with `Observation:` and can echo a known license header, but it can't stop or stay grounded — it loops one token (`ibraries`, `expensive`) to the cap, or invents filesystem state. Its world-model competence is real but unreliable (median PPL 2.27, with a heavy tail — 17/100 held-out trajectories at PPL > 10).
-
-**(c) is the new point — and the probe confirms it.** At 10K, user-only (c) is the strongest 10K arm on samples (0.52), and on the `tbls` trial reaches 0.87 — matching (b) at *1M*. The [env-PPL probe](/world-model-probe) makes it rigorous: (c) 10K scores **median 1.14**, edging (b) 10K (1.17) and far ahead of (a) 10K (1.81), with zero catastrophic trajectories. Since (a) ⊕ (c) = (b) at the token level, this pins the cause to the mask: loss on observation tokens is what builds the world model. (c) at 100K/1M is training to confirm the ordering holds with scale.
-
-Pick models with the pills below; the note under each sample summarizes how the 5 draws behaved.
+Browse all 49 trials below — pick 1–2 models, filter by regime. Each cell shows that model's **per-trial** env-PPL (not the corpus mean) and a representative sample, with all 5 draws expandable.
 
 <SampleExplorer />
