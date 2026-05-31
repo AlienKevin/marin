@@ -8,16 +8,29 @@ import { SampleExplorer } from '../components/SampleExplorer'
 
 The [world-model probe](/world-model-probe) measures env-token *perplexity*. This page makes those numbers tangible: instead of scoring the real observation, we **sample** it. For 10 held-out trajectories from unseen repos, each model is given the first 14 (command, observation) pairs **plus the 15th command**, and asked to produce the **15th terminal observation** — drawn **5×** at the exact SWE-bench eval settings (temperature 1.0, `max_tokens=4096`, `max_model_len=32768`). Generation is in agent framing (the observation is the next `user` turn), so these samples line up one-to-one with the PPL table.
 
-## What the samples show
+Six checkpoints are sampled on the **same** 10 trials: `base`, and the three loss masks — (a) assistant-only, (b) full-transcript, (c) user-only — at 10K and (for a/b) 1M. Pick any 1–2 with the pills below.
 
-**1. (a) doesn't simulate — it keeps *acting*.** Asked for the terminal's reply, the assistant-only 1M model continues *as the agent*: it narrates a plan and issues the **next command** (trials #1–2), or collapses to a degenerate fragment (` ``` `, `Observ`). It has no notion that the next turn belongs to the environment. This is catastrophic forgetting made visible, and exactly why its env-PPL is the worst of the three (median 3.33, *above* the untrained base).
+## The headline is *scale*, not just the mask
 
-**2. (b) reproduces real output — including knowing when there is none.** The full-transcript 1M model returns faithful file contents and code, often byte-identical (trial #1 matches all 107 characters), and — the sharpest tell — predicts the **empty** observation when a command writes a file and prints nothing (trial #3), where base instead hallucinates a 22,000-character directory listing. It learned both the *format* and the *content* of being a terminal.
+Aggregating character-overlap to the real observation across all 10 trials (mean over 5 draws, "faithful" = ≥ 0.8 overlap):
 
-**3. base has the format but not the control.** The pretrained model knows observations open with `Observation:` and can sometimes echo a known license header or the right code structure — its incidental world-model competence (median PPL 2.27) is real — though it carries a heavy tail of outright failures (8/100 held-out trajectories, worst 343×). But it can't stop or stay grounded: it loops a single token (`ibraries`, `expensive`) to the token cap, or invents filesystem state that never existed. Useful-looking, unreliable.
+| checkpoint | mean similarity | faithful trials | env-PPL |
+|---|---:|---:|---:|
+| base | 0.04 | 0/10 | 2.27 |
+| (a) assistant-only · 10K | 0.48 | 4/10 | 1.81 |
+| (b) full-transcript · 10K | 0.45 | 3/10 | 1.16 |
+| (c) user-only · 10K | 0.52 | 4/10 | … |
+| **(a) assistant-only · 1M** | **0.07** | **0/10** | 3.33 |
+| **(b) full-transcript · 1M** | **0.79** | **7/10** | 1.07 |
 
-**The sampled quality ranking matches the scored ranking.** Best world model to worst is **(b) → base → (a)** — i.e. median env-PPL **1.07 ≪ 2.27 < 3.33** (lower = better simulator). (b) reproduces real output, base is shaky, (a) doesn't simulate at all: the exact order the probe reports. The qualitative page and the quantitative probe are two views of the same result. Arm (c) (user-only, training now) and the 10K checkpoints will be added here as they land.
+**1. At 1M, the masks split violently — and only this is visible in free sampling.** (a) **collapses to 0.07**: asked for the terminal's reply it continues *as the agent*, narrating a plan and issuing the next command, or emitting a degenerate fragment (` ``` `, `Observ`). It no longer knows the next turn belongs to the environment — catastrophic forgetting, made visible. (b) **sharpens to 0.79**: faithful file contents, often byte-identical (the fastify trial matches all 107 chars), and — the sharpest tell — it predicts the **empty** observation when a command prints nothing, where base hallucinates a 22,000-char directory listing.
 
-Pick models with the pills below; the variance note under each sample summarizes how the other 4 draws behaved.
+**2. At 10K, sampling can't separate the masks — but the probe can.** All three 10K masks sample comparably (~0.45–0.52), yet the teacher-forced [env-PPL probe](/world-model-probe) *does* split them cleanly at 10K (b-10k **1.16** ≪ a-10k **1.81**). Temperature-1.0 sampling is simply too noisy to surface a gap this size; perplexity, which integrates over the whole distribution, is the more sensitive instrument. **The probe is the rigorous comparison; this page is the intuition for what the extremes feel like.**
+
+**3. base has the format but not the control.** It knows observations open with `Observation:` and can echo a known license header, but it can't stop or stay grounded — it loops one token (`ibraries`, `expensive`) to the cap, or invents filesystem state. Its world-model competence is real but unreliable (median PPL 2.27, with a heavy tail — 17/100 held-out trajectories at PPL > 10).
+
+**(c) is the new point.** At 10K, user-only (c) is the strongest 10K arm on samples (0.52) and on the `tbls` trial reaches 0.87 — matching (b) at *1M*. Whether that lead holds rigorously waits on (c)'s env-PPL (running) and its 100K/1M checkpoints (training).
+
+Pick models with the pills below; the note under each sample summarizes how the 5 draws behaved.
 
 <SampleExplorer />

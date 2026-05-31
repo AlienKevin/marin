@@ -8,15 +8,36 @@
    "default": false
   },
   {
+   "key": "a-10k",
+   "label": "(a) asst-only · 10K",
+   "ppl": "1.81",
+   "color": "#f59e0b",
+   "default": false
+  },
+  {
+   "key": "b-10k",
+   "label": "(b) full-trans · 10K",
+   "ppl": "1.16",
+   "color": "#34d399",
+   "default": false
+  },
+  {
+   "key": "c-10k",
+   "label": "(c) user-only · 10K",
+   "ppl": "…",
+   "color": "#3b82f6",
+   "default": false
+  },
+  {
    "key": "a-1m",
-   "label": "(a) assistant-only · 1M",
+   "label": "(a) asst-only · 1M",
    "ppl": "3.33",
    "color": "#d97706",
    "default": true
   },
   {
    "key": "b-1m",
-   "label": "(b) full-transcript · 1M",
+   "label": "(b) full-trans · 1M",
    "ppl": "1.07",
    "color": "#059669",
    "default": true
@@ -44,19 +65,49 @@
      "text": "Observation: ibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibraries\nibrarie",
      "len": 18427,
      "trunc": true,
-     "note": "All 5 identical — emits the `Observation:` header, then loops the token “ibraries” to the 4k-token cap (18,427 chars)."
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.00.",
+     "mean_sim": 0.0,
+     "faithful": 0
+    },
+    "a-10k": {
+     "text": "Observation: 53-  function startRedirectHandler (request, reply) {\n54-    const state = generateStateFunction()\n55-\n56:    const authorizationUri = this[name].authorizationCode.authorizeURL({\n57-      redirect_uri: callbackUri,\n58-      scope: scope,\n59-      state: state\n60-    })\n61-    reply.redirect(authorizationUri)\n62-  }\n63-\n64-  const cbk = function (o, code, callback) {\n65-    return o.authorizationCode.getToken({\n66-      code: code,\n67-      redirect_uri: callbackUri\n68-    }, callback)\n69-  }\n70-\n71-  function getAccessTokenFromAuthorizationCodeFlowCallbacked (request, callback) {\n72-    const code = request.query.code\n73-    const state = request.query.state\n74-\n75-    checkStateFunction(state, function (err) {\n76-      if (err) {\n77-        callback(err)\n78-        return\n79-      }\n80-      cbk(fastify[name], code, callback)\n81-    })\n82-  }\n83-  const getAccessTokenFromAuthorizationCodeFlowPromiseified = promisify(getAccessTokenFromAuthorizationCodeFlowCallbacked)\n84-  function getAccessTokenFromAuthorizationCodeFlow (request, callback) {\n85-    if (!callback) {\n86-  ",
+     "len": 13820,
+     "trunc": true,
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.02.",
+     "mean_sim": 0.02,
+     "faithful": 0
+    },
+    "b-10k": {
+     "text": "Observation:   function startRedirectHandler (request, reply) {\n    const state = generateStateFunction()\n\n    const authorizationUri = this[name].authorizationCode.authorizeURL({\n      redirect_uri: callbackUri,\n      scope: scope,\n      state: state\n    })\n    reply.redirect(authorizationUri)\n  }\n\n  const cbk = function (o, code, callback) {\n    return o.authorizationCode.getToken({\n      code: code,\n      redirect_uri: callbackUri\n    }, callback)\n  }\n\n  function getAccessTokenFromAuthorizationCodeFlowCallbacked (request, callback) {\n    const code = request.query.code\n    const state = request.query.state\n\n    checkStateFunction(state, function (err) {\n      if (err) {\n        callback(err)\n        return\n      }\n      cbk(fastify[name], code, callback)\n    })\n  }\n  const getAccessTokenFromAuthorizationCodeFlowPromiseified = promisify(getAccessTokenFromAuthorizationCodeFlowCallbacked)\n\n  const getAccessTokenFromAuthorizationCodeFlow = function (request, callback) {\n    if (!callback) {\n      return getAccessTokenFromAuthorizationCodeFlowPromiseified(request)\n    }\n    getAccessTo",
+     "len": 1508,
+     "trunc": true,
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.13.",
+     "mean_sim": 0.13,
+     "faithful": 0
+    },
+    "c-10k": {
+     "text": "Observation:   function startRedirectHandler (request, reply) {\n    const state = generateStateFunction()\n\n    const authorizationUri = this[name].authorizationCode.authorizeURL({\n      redirect_uri: callbackUri,\n      scope: scope,\n      state: state\n    })\n    reply.redirect(authorizationUri)\n  }\n\n  const cbk = function (o, code, callback) {\n    return o.authorizationCode.getToken({\n      code: code,\n      redirect_uri: callbackUri\n    }, callback)\n  }\n\n  function getAccessTokenFromAuthorizationCodeFlowCallbacked (request, callback) {\n    const code = request.query.code\n    const state = request.query.state\n\n    checkStateFunction(state, function (err) {\n      if (err) {\n        callback(err)\n        return\n      }\n      cbk(fastify[name], code, callback)\n    })\n  }\n  const getAccessTokenFromAuthorizationCodeFlowPromiseified = promisify(getAccessTokenFromAuthorizationCodeFlowCallbacked)\n\n  const getAccessTokenFromAuthorizationCodeFlow = function (request, callback) {\n    if (!callback) {\n      return getAccessTokenFromAuthorizationCodeFlowPromiseified(request)\n    }\n    getAccessTo",
+     "len": 2311,
+     "trunc": true,
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.09.",
+     "mean_sim": 0.09,
+     "faithful": 0
     },
     "a-1m": {
      "text": "\nLet me get the complete function to understand the structure:\n\n```bash\nsed -n '53,85p' index.js\n```\n",
      "len": 101,
      "trunc": false,
-     "note": "All 5 nearly identical — instead of terminal output it continues *as the agent*: narrates a plan and issues a new `sed` command."
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.30.",
+     "mean_sim": 0.3,
+     "faithful": 0
     },
     "b-1m": {
      "text": "Observation:   function startRedirectHandler (request, reply) {\n    const state = generateStateFunction()\n\n",
      "len": 107,
      "trunc": false,
-     "note": "All 5 byte-identical to the real output (107 chars)."
+     "note": "5/5 faithful (≥0.8 char-overlap to real); mean similarity 1.00.",
+     "mean_sim": 1.0,
+     "faithful": 5
     }
    }
   },
@@ -79,19 +130,49 @@
      "text": "Observation: \ndefer func() {\n\terr = errors.WithStack(err)\n}()\n\nif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\tfor _, p := range DefaultConfigFilePaths {\n\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\tif path != \"\" {\n\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t}\n\t\t\tpath = p\n\t\t}\n\t}\n}\n\nif path == \"\" {\n\treturn nil\n}\n\nfullPath, err := filepath.Abs(path)\n.assertIn\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.assertIn\n\n.",
      "len": 22274,
      "trunc": true,
-     "note": "All 5 identical — right Go structure, but never stops: runs to the 4k-token cap (22,274 chars vs the real 417)."
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.03.",
+     "mean_sim": 0.03,
+     "faithful": 0
+    },
+    "a-10k": {
+     "text": "Observation: \n360:\tdefer func() {\n361:\t\terr = errors.WithStack(err)\n362:\t}()\n363:\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n364:\t\tfor _, p := range DefaultConfigFilePaths {\n365:\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n366:\t\t\t\tif path != \"\" {\n367:\t\t\t\t\treturn fmt.Errorf(\"duplicate config file [%s, %s]\", path, p)\n368:\t\t\t\t}\n369:\t\t\t\tpath = p\n370:\t\t\t}\n371:\t\t}\n372:\t}\n373:\tif path == \"\" {\n374:\t\treturn nil\n375:\t}\n376:\n377:\tfullPath, err := filepath.Abs(path)\n378:\tif err != nil {\n379:\t\treturn err\n380:\t}\n381:\treturn c.LoadConfigFile(fullPath)\n382:}()\n```\n",
+     "len": 592,
+     "trunc": false,
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.49.",
+     "mean_sim": 0.49,
+     "faithful": 0
+    },
+    "b-10k": {
+     "text": "Observation: \tdefer func() {\n\t\terr = errors.WithStack(err)\n\t}()\n\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\t\tfor _, p := range DefaultConfigFilePaths {\n\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\t\tif path != \"\" {\n\t\t\t\t\treturn fmt.Errorf(\"duplicate config file [%s, %s]\", path, p)\n\t\t\t\t}\n\t\t\t\tpath = p\n\t\t\t}\n\t\t}\n\t}\n\tif path == \"\" {\n\t\treturn nil\n\t}\n",
+     "len": 385,
+     "trunc": false,
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.75.",
+     "mean_sim": 0.75,
+     "faithful": 0
+    },
+    "c-10k": {
+     "text": "Observation: \tdefer func() {\n\t\terr = errors.WithStack(err)\n\t}()\n\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\t\tfor _, p := range DefaultConfigFilePaths {\n\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\t\tif path != \"\" {\n\t\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t\t}\n\t\t\t\tpath = p\n\t\t\t}\n\t\t}\n\t}\n\tif path == \"\" {\n\t\treturn nil\n\t}\n",
+     "len": 416,
+     "trunc": false,
+     "note": "5/5 faithful (≥0.8 char-overlap to real); mean similarity 0.87.",
+     "mean_sim": 0.87,
+     "faithful": 5
     },
     "a-1m": {
      "text": "I need to be more careful with the sed command. Let me revert and do this properly by looking at the exact context:\n\n```bash\nsed -i '364,371d' config/config.go && sed -i '364i\\tfor _, p := range DefaultConfigFilePaths {\\n\\t\\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\\n\\t\\t\\tif path != \"\" {\\n\\t\\t\\t\\treturn fmt.Errorf(\"duplicate config file [%s, %s]\", path, p)\\n\\t\\t\\t}\\n\\t\\t\\tpath = p\\n\\t\\t}\\n\\t}' config/config.go\n```\n",
      "len": 452,
      "trunc": false,
-     "note": "All 5 continue as the agent — two variants, both diagnose the previous `sed` and issue corrective edit commands. None is terminal output."
+     "note": "0/5 faithful (≥0.8 char-overlap to real); mean similarity 0.28.",
+     "mean_sim": 0.28,
+     "faithful": 0
     },
     "b-1m": {
      "text": "Observation: \tdefer func() {\n\t\terr = errors.WithStack(err)\n\t}()\n\tif path == \"\" && os.Getenv(\"TBLS_DSN\") == \"\" {\n\t\tfor _, p := range DefaultConfigFilePaths {\n\t\t\tif f, err := os.Stat(filepath.Join(c.root, p)); err == nil && !f.IsDir() {\n\t\t\t\tif path != \"\" {\n\t\t\t\t\treturn fmt.Errorf(\"duplicate config files: %s\", strings.Join(DefaultConfigFilePaths, \", \"))\n\t\t\t\t}\n\t\t\t\tpath = \"\"\n\t\t\t}\n\t\t}\n\t}\n\tif path == \"\" {\n\t\treturn nil\n\t}\n\n",
      "len": 418,
      "trunc": false,
-     "note": "All 5 reproduce the real Go source; 387–418 chars depending on where each stops."
+     "note": "3/5 faithful (≥0.8 char-overlap to real); mean similarity 0.90.",
+     "mean_sim": 0.9,
+     "faithful": 3
     }
    }
   },
@@ -114,19 +195,49 @@
      "text": "Observation: .RemoveEmptyEntries\ndrwxr-xr-x 3 root root  60 May  2 04:50 .\ndrwxr-xr-x 8 root root 440 May  2 04:50 ..\ndrwxr-xr-x 2 root root 440 May  2 04:50 uplift\n\nls: cannot access 'uplift/': No such file or directory\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections\nollections",
      "len": 22220,
      "trunc": true,
-     "note": "All 5 hallucinate output for a command that printed nothing — here an invented `ls -la` directory tree plus error spew (up to 22,220 chars)."
+     "note": "0/5 correctly near-empty; mean similarity 0.00.",
+     "mean_sim": 0.0,
+     "faithful": 0
+    },
+    "a-10k": {
+     "text": "Observation: ",
+     "len": 13,
+     "trunc": false,
+     "note": "5/5 correctly near-empty; mean similarity 1.00.",
+     "mean_sim": 1.0,
+     "faithful": 5
+    },
+    "b-10k": {
+     "text": "Observation: ",
+     "len": 13,
+     "trunc": false,
+     "note": "5/5 correctly near-empty; mean similarity 1.00.",
+     "mean_sim": 1.0,
+     "faithful": 5
+    },
+    "c-10k": {
+     "text": "Observation: ",
+     "len": 13,
+     "trunc": false,
+     "note": "5/5 correctly near-empty; mean similarity 1.00.",
+     "mean_sim": 1.0,
+     "faithful": 5
     },
     "a-1m": {
      "text": "Now I need to modify the changelog task to actually filter out prerelease tags when SkipPrerelease is enabled. Looking at the code, I need to modify the logic in the `changelog.go` file to check if we should skip prerelease tags.\n\nLet me first check the current logic in the changelog task to understand where to add the filtering:\n\n```bash\n# Let me look at the part of the changelog task that handles tag processing\ngrep -n -A 20 -B 5 \"ctx.Changelog.All\" cmd/uplift/changelog.go\n```\n",
      "len": 484,
      "trunc": false,
-     "note": "Highly variable (4–881 chars): a stray “```” or short agent-style plans to edit the changelog — none is terminal output."
+     "note": "1/5 correctly near-empty; mean similarity 0.04.",
+     "mean_sim": 0.04,
+     "faithful": 0
     },
     "b-1m": {
      "text": "Observation: ",
      "len": 13,
      "trunc": false,
-     "note": "All 5 correctly predict an empty observation — the command writes a file and prints nothing."
+     "note": "5/5 correctly near-empty; mean similarity 1.00.",
+     "mean_sim": 1.0,
+     "faithful": 5
     }
    }
   }
