@@ -10,17 +10,16 @@ The [world-model probe](/world-model-probe) reports one perplexity number per ch
 
 ## The key axis: how much of the answer is already in context
 
-A terminal observation can be one of two very different things. Sometimes it's a **re-display** of content the agent already saw — `sed -n '53,75p' index.js` after the file was `cat`'d three turns ago. Predicting that is an *in-context copy*. Other times it's **genuinely new** — a fresh `grep` hit, a test log, the first read of a file — which can only be *generated*. To separate these, every held-out target is scored for **copyable fraction**: what % of it appears verbatim (≥12-char spans) somewhere earlier in the model's context. We then stratify 49 trials across the spectrum.
+A terminal observation can be one of two very different things. Sometimes it's a **re-display** of content the agent already saw — `sed -n '53,75p' index.js` after the file was `cat`'d three turns ago. Predicting that is an *in-context copy*. Other times it's **genuinely new** — a fresh `grep` hit, a test log, the first read of a file — which can only be *generated*. To separate these, every held-out target is scored for **copyable fraction**: what share of it appears verbatim (12-char-or-longer spans) somewhere earlier in the model's context. We then stratify trials across the spectrum, plus the empty-output case.
 
-**The per-bucket median env-PPL table below is the headline.** Read it left to right (easy → hard):
+**The per-bucket median env-PPL table below is the headline.** Read it top to bottom (easy → hard):
 
-- **Retrieval trials (≥90% copyable): every arm is ~1.0.** When the answer is in context, even (a) 1M — the worst world model overall — reproduces it fine (1.07). These trials are *not* what separates the arms.
-- **Pure-generation trials (<10% copyable): the arms split violently.** (a) 1M explodes to **≈20 PPL — worse than the untrained base** — because it has forgotten how to *be* a terminal and instead tries to act. (b)/(c) stay at ≈2.3. **This single bucket is where the entire global gap (1.07 vs 3.33) comes from.**
-- The gradient between is monotone: as less of the observation is copyable, every model degrades, but (a) degrades *catastrophically* while (b)/(c) degrade *gracefully*.
-- **Empty-output trials:** (b)/(c) (and a-1m) correctly predict a blank observation (~1.0); base hallucinates a wall of text (2.06).
+- **Retrieval trials (≥90% copyable): every arm is ~1.0–1.2.** When the answer is already in context, even (a) 1M — the worst world model overall — reproduces it fine (1.15, essentially tied with (b)'s 1.02). These trials do **not** separate the arms.
+- **The (a)-vs-(b) gap grows monotonically as the observation gets less copyable.** Mixed: (a) 1M 4.01 vs (b) 1M 1.56. Mostly-generation: 3.81 vs 2.21. Pure-generation (≤10% copyable): **5.73 vs 2.95** — and (a) 1M (5.73) is now *worse than the untrained base* (3.63), the signature of catastrophic forgetting. Crucially, **no** arm gets pure-generation near 1.0 — even (b)/(c) sit at ~2.5–3.0. That floor is the inherent ceiling: you cannot emit the literal contents of a file you've never seen.
+- **Empty-output trials are the single sharpest split.** When a command prints nothing, (b)/(c) confidently predict the blank observation (~1.0), while base (10.02) and (a) 1M (9.39) blow up — they never learned that an observation can be empty, so they expect content (or a next action) and are maximally surprised by silence.
 
-So "(b) is a better world model than (a)" precisely means: **on the trials that require generating unseen content, (a) collapses and (b) doesn't.** They are indistinguishable on the easy (retrieval) trials. This is the quantitative form of *format generalizes, content memorizes* — and it's why no arm, not even (b), gets the pure-generation bucket near 1.0: emitting the literal contents of a never-seen file is the inherent ceiling.
+So "(b) is a better world model than (a)" resolves to something precise: **the two arms are indistinguishable on retrieval, and the entire global gap (1.07 vs 3.33 median) is concentrated in the generation-heavy and empty buckets** — exactly the cases that require *being* a terminal rather than copying one. This is the quantitative form of *format generalizes, content memorizes*.
 
-Browse all 49 trials below — pick 1–2 models, filter by regime. Each cell shows that model's **per-trial** env-PPL (not the corpus mean) and a representative sample, with all 5 draws expandable.
+Browse all trials below — pick 1–2 models, filter by regime. Each cell shows that model's **per-trial** env-PPL (not the corpus mean) and a representative sample, with all 5 draws expandable.
 
 <SampleExplorer />
