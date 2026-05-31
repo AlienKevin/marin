@@ -8,7 +8,19 @@ import { SampleExplorer } from '../components/SampleExplorer'
 
 The [world-model probe](/world-model-probe) reports one perplexity number per checkpoint. This page breaks that number open. For each held-out trajectory we give the model the first 14 (command, observation) pairs **plus the 15th command**, and ask for the **15th observation** — both *sampled* 5× (temperature 1.0, the SWE-bench decoding settings) and *scored* (teacher-forced env-PPL of the real observation). Agent framing throughout, so it lines up with the probe.
 
-## The key axis: how much of the answer is already in context
+## How the world model sharpens with context depth
+
+Before the 15th-turn deep-dive: does predicting the *next* observation get easier as the conversation accumulates? We re-scored the same 100 held-out trajectories at three depths — predicting the **1st** observation (cold start, no prior turns), the **8th** (mid-trajectory), and the **15th** (the rest of this page). Median env-PPL, lower = better:
+
+| context depth | base | (a) asst-only 10K | (a) asst-only 1M | (b) full-trans 10K | (b) full-trans 1M | (c) user-only 10K |
+|---|--:|--:|--:|--:|--:|--:|
+| turn 1 (cold start) | 4.38 | 4.98 | 6.80 | 1.89 | 2.41 | 1.88 |
+| turn 8 (mid) | 3.32 | 2.61 | 5.65 | 1.21 | 1.16 | 1.24 |
+| turn 15 (warm) | 2.27 | 1.81 | **3.33** | 1.16 | **1.07** | 1.14 |
+
+Two things jump out. **(1) (b)/(c) dominate at every depth, and the gap is already enormous at cold start.** Even at turn 1 — no prior turns, the hardest case — (b)/(c) sit at ~1.9 while (a) 1M is at **6.80** and base at 4.38. Keeping observation tokens in the loss builds a terminal prior that works from the first turn, not just once context accumulates. **(2) Every arm sharpens with depth except (a) 1M, which stays catastrophic.** base 4.38 → 3.32 → 2.27, (b) 1M 2.41 → 1.16 → 1.07, (c) 1.88 → 1.24 → 1.14 — all improve monotonically as the conversation grows. But (a) 1M goes 6.80 → 5.65 → 3.33: it improves *slower* and remains the worst non-base arm at every depth, ending *above the untrained base* at turn 15. Standard agent SFT has specialized so hard on emitting commands that it is a poor terminal predictor regardless of how much environment context it is given. (All n=100, teacher-forced; turn-15 column reproduces the [probe table](/world-model-probe) exactly.)
+
+## The key axis (at turn 15): how much of the answer is already in context
 
 A terminal observation can be one of two very different things. Sometimes it's a **re-display** of content the agent already saw — `sed -n '53,75p' index.js` after the file was `cat`'d three turns ago. Predicting that is an *in-context copy*. Other times it's **genuinely new** — a fresh `grep` hit, a test log, the first read of a file — which can only be *generated*. To separate these, every held-out target is scored for **copyable fraction**: what share of it appears verbatim (12-char-or-longer spans) somewhere earlier in the model's context. We then stratify trials across the spectrum, plus the empty-output case.
 
