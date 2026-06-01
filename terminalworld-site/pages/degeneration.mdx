@@ -1,0 +1,57 @@
+---
+title: Sampling degeneration
+---
+
+import { DegenByModel, DegenByBand, DegenExemplar } from '../components/DegenView'
+
+# Why do sampled observations degenerate into loops?
+
+When you *sample* (rather than teacher-force) the 15th observation, a striking fraction of generations collapse into repetition — runaway imports, a single line echoed hundreds of times, an incrementing counter that never stops. Here is the example that prompted this page: arm (b) full-transcript 1M, on `ossf/package-analysis`, with a perfectly respectable **env-PPL of 2.50**:
+
+<DegenExemplar />
+
+This page quantifies the phenomenon across all **1,380** sampled generations (the 46 stratified held-out trials × 6 checkpoints × 5 draws). A generation is flagged **degenerate** if it is long (> 800 chars) *and* highly compressible (zlib ratio < 0.08 — i.e. almost entirely repeated content). **26.9% of all samples degenerate.**
+
+## 1. It is a *sampling* failure, not a *modeling* failure — and low perplexity does not protect you
+
+The single most important finding: degeneration peaks in the **middle** perplexity band, not the worst one. Grouping every sample by its trial's teacher-forced env-PPL:
+
+<DegenByBand />
+
+A sample whose target the model scores at **PPL 1.5–3 — a "good" world-model score — degenerates 42% of the time.** The worst single looper in the set sits at **PPL 1.3** (`mccutchen/go-httpbin`, 20,068 chars of one repeated block). Teacher-forced perplexity measures *next-token accuracy given the true prefix*; it says nothing about whether free-running generation stays on the rails. The two come apart exactly here: the model assigns high probability to the real continuation **and** high probability to looping, and at temperature 1.0 the loop is an absorbing state. This is the classic neural-text-degeneration failure (Holtzman et al.), and it means **env-PPL is necessary but not sufficient** to certify a checkpoint as a usable simulator — you have to also measure free-running stability, which this page does.
+
+## 2. Degeneration tracks how much the model actually *generates* content
+
+Per checkpoint:
+
+<DegenByModel />
+
+Read this together with the [world-model probe](/world-model-probe), because the ranking is **not** "better world model = less degeneration":
+
+- **base degenerates 92% of the time.** It has the format but no control (the finding from [simulator samples](/simulator-samples)): it opens `Observation:` and then loops to the cap. Almost every base sample is degenerate.
+- **(b)/(c) are in the middle (13–24%).** They genuinely generate file contents, and *generating long content is exactly where looping happens* — so they pay a moderate degeneration rate as the price of actually simulating.
+- **(a) 1M degenerates only 1.3% — but this is a false virtue.** (a) 1M doesn't loop because it **doesn't generate observations at all**: it emits a short agent-style command and stops (the "keeps acting instead of simulating" failure). You cannot degenerate into a loop if you only output 15 characters. Its low score here is the *same* pathology as its terrible env-PPL, viewed from the other side.
+
+So degeneration is highest for models that try to produce long content (base, and the heavily-content-generating (b)/(c) on long targets) and lowest for the model that has stopped producing observations entirely.
+
+## 3. Where it happens: the generation-heavy middle buckets
+
+Cross-referencing the [copyable-fraction buckets](/simulator-samples), degeneration concentrates in **Mixed (36%)** and **Mostly-generation (40%)** trials — where the model must produce substantial *novel* content — and is far rarer on **Retrieval (20%)**, **Pure-generation (18%)**, and **Empty (17%)** trials. The pattern fits: pure-retrieval targets are short copies (little room to loop); empty targets are blank (nothing to loop); but a *mostly-generated* file is long enough, and uncertain enough, for the sampler to slip into a repeated structure (imports, similar method signatures, list entries) and never escape.
+
+## What the loops look like
+
+Of the 371 degenerate samples, three mechanical kinds:
+
+- **n-gram loops (169)** — a multi-line block repeated verbatim (the most common).
+- **exact-line loops (165)** — one identical line echoed 8+ times (`.assertIn`, ` expensive`, `Observation:` headers).
+- **incrementing loops (37)** — a counter that ratchets up forever: `analysis_module_2, _3, _4, …` (the exemplar above), or `Region: aws.String("us-east-1")` with rising indices. These are the most "intelligent-looking" failures — the model has learned a real pattern (sequential imports) but no stopping criterion.
+
+Degenerate samples have a median length of **17,037 chars** vs **134** for non-degenerate ones, and **74%** run to within a hair of the 4,096-token cap — they stop only because they hit the limit, not because they finish. The real observations they're imitating compress to a median zlib ratio of **0.327**; the degenerate samples compress to **0.021** — an order of magnitude more repetitive than any real terminal output.
+
+## Takeaway
+
+Degeneration is a **decoding-time** pathology orthogonal to the loss-mask story: it afflicts whichever model is actually trying to emit long content, and it is invisible to teacher-forced perplexity (it's worst in the 1.5–3 PPL band). For TerminalWorld's goal of a usable simulator, this argues for two things the PPL probe alone misses: (1) report **free-running stability**, not just perplexity, when grading a checkpoint; and (2) at serving time, use repetition-aware decoding (repetition penalty, no-repeat-ngram, or nucleus sampling with a cap) rather than raw temperature-1.0 sampling.
+
+---
+
+*Computed over all 1,380 strat-49 sampled generations; metrics and per-trial data in `scripts/degen_analysis.py`. "Degenerate" = length > 800 chars and zlib compression ratio < 0.08.*
