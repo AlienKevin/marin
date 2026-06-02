@@ -11,9 +11,17 @@ Phase 0.5 is the **downstream payoff** experiment: *does training an agent again
 
 The simulator is either the [dedicated env-rewritten simulator](/world-model-probe) or the new [(c) user-only model](/phase-0); the [world-model probe](/world-model-probe) is what tells us a 1.7B simulator is even good enough to try this.
 
-### Stage 1 status — static env-substitution (blocked on infra)
+### Closed-loop self-play is now running — the two-vLLM blocker is gone
 
-The env-substitution job ([`scripts/substitute_env_with_simulator.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/substitute_env_with_simulator.py)) regenerates every env message in the 10K trajectories with the simulator, then [`…_10k_8k_tw_substituted.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_10k_8k_tw_substituted.py) trains an agent on it. Six iris launches all died on the controller's ~2 hr TTL for long jobs — even a per-shard incremental-write version landed no output before TTL. Needs a different runner (Ray cluster, or per-shard splits within the iris window). The simulator-quality findings below are the prerequisite that justifies finishing it.
+**The unblock:** arm **(b) full-transcript 1M is a policy *and* a world model in one network** (it was trained on the whole transcript — assistant turns are commands, user turns are observations). So a **single vLLM plays both roles**, alternating turn by turn, and the two-vLLM-on-one-chip coordination that killed the earlier attempt (`TPU_VISIBLE_CHIPS` not honored) simply doesn't arise. One v6e-4, one model, agent ↔ simulator self-play seeded from held-out tasks ([`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)). **This is running now** (20 episodes × up to 50 turns); the coherence/cost results replace the projections below as they land.
+
+The three documented simulator pathologies (loops, no-EOS runaway, `<think>` leak) all came from the **dropped dedicated env-rewritten sim**, the *worst* checkpoint; the self-play run uses **(b) 1M** — the best simulator (env-PPL 1.07, lowest degeneration of any genuine generator) — with the [degeneration fixes](/simulator-samples) applied to the sim turn (`max_tokens=512`, repetition penalty, thinking disabled).
+
+**One honest limit:** a *fully*-simulated rollout has **no ground-truth pass/fail** — if the simulator also writes the test output, "tests passed" is itself a hallucination. So self-play validates **closed-loop coherence and cost**, not pass@1. The real payoff number needs the separate experiment: **SFT an agent on simulator-generated rollouts, then eval that agent on the *real* container** (the sim replaces the env during data generation; grading stays real).
+
+#### Earlier Stage-1 attempt (superseded)
+
+The static env-substitution job ([`scripts/substitute_env_with_simulator.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/substitute_env_with_simulator.py)) regenerated every env message in the 10K trajectories with the simulator, then [`…_10k_8k_tw_substituted.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_10k_8k_tw_substituted.py) trained an agent on it. Six iris launches died on the controller's ~2 hr TTL. Superseded by the single-model self-play above, which needs no offline substitution pass.
 
 ### Where's the bottleneck? Two cheap probes
 
