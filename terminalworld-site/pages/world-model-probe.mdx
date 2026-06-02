@@ -17,18 +17,23 @@ title: World-model probe (env-token PPL)
 
 PPL on held-out env tokens (lower = better world model). Two aggregations: **token-weighted** (every target token counts equally — dominated by long outputs) and **median per-trajectory** (the typical observation).
 
-| checkpoint | loss mask | token-weighted PPL | median per-traj PPL | mean | max (worst traj) |
+Rows are grouped by training arm (base anchor, then assistant-only, full-transcript, user-only). All four metrics are **lower = better** (↓); within each arm, the best cell per column is **bolded**.
+
+| checkpoint | loss mask | token-weighted PPL ↓ | median per-traj PPL ↓ | mean ↓ | max (worst traj) ↓ |
 |---|---|---:|---:|---:|---:|
-| **base** Qwen3-1.7B-Base | none (pretrained) | 1.81 | 2.27 | 16.25 | 343 |
-| (a) 10K | assistant-only | 2.01 | 1.81 | 7.21 | 203 |
-| (a) 100K | assistant-only | 2.21 | 2.45 | 4.93 | 52 |
-| (a) 1M | assistant-only | 2.58 | **3.33** | 14.43 | 325 |
-| (b) 10K | full-transcript | 1.74 | 1.17 | 1.54 | 5.1 |
+| base Qwen3-1.7B-Base | none (pretrained) | 1.81 | 2.27 | 16.25 | 343 |
+| &nbsp; | | | | | |
+| (a) 10K | assistant-only | **2.01** | **1.81** | 7.21 | 203 |
+| (a) 100K | assistant-only | 2.21 | 2.45 | **4.93** | **52** |
+| (a) 1M | assistant-only | 2.58 | 3.33 | 14.43 | 325 |
+| &nbsp; | | | | | |
+| (b) 10K | full-transcript | **1.74** | 1.17 | **1.54** | **5.1** |
 | (b) 100K | full-transcript | 1.79 | 1.11 | 1.55 | 5.3 |
 | (b) 1M | full-transcript | 1.87 | **1.07** | 1.59 | 7.9 |
-| **(c) 10K** | **user-only** | 1.75 | **1.14** | 1.53 | 5.2 |
-| **(c) 100K** | **user-only** | 1.80 | **1.10** | 1.54 | 5.3 |
-| **(c) 1M** | **user-only** | 1.84 | **1.05** | 1.57 | 6.6 |
+| &nbsp; | | | | | |
+| (c) 10K | user-only | **1.75** | 1.14 | **1.53** | **5.2** |
+| (c) 100K | user-only | 1.80 | 1.10 | 1.54 | 5.3 |
+| (c) 1M | user-only | 1.84 | **1.05** | 1.57 | 6.6 |
 
 ## Three takeaways
 

@@ -13,11 +13,13 @@ The [world-model probe](/world-model-probe) reports one perplexity number per ch
 
 Before the 15th-turn deep-dive: does predicting the *next* observation get easier as the conversation accumulates? We re-scored the same 100 held-out trajectories at three depths — predicting the **1st** observation (cold start, no prior turns), the **8th** (mid-trajectory), and the **15th** (the rest of this page). Median env-PPL, lower = better:
 
+Median env-PPL (↓ lower = better); **bold** = best (lowest) in each row.
+
 | context depth | base | (a) asst-only 10K | (a) asst-only 1M | (b) full-trans 10K | (b) full-trans 1M | (c) user-only 10K |
 |---|--:|--:|--:|--:|--:|--:|
-| turn 1 (cold start) | 4.38 | 4.98 | 6.80 | 1.89 | 2.41 | 1.88 |
-| turn 8 (mid) | 3.32 | 2.61 | 5.65 | 1.21 | 1.16 | 1.24 |
-| turn 15 (warm) | 2.27 | 1.81 | **3.33** | 1.16 | **1.07** | 1.14 |
+| turn 1 (cold start) | 4.38 | 4.98 | 6.80 | 1.89 | 2.41 | **1.88** |
+| turn 8 (mid) | 3.32 | 2.61 | 5.65 | 1.21 | **1.16** | 1.24 |
+| turn 15 (warm) | 2.27 | 1.81 | 3.33 | 1.16 | **1.07** | 1.14 |
 
 Two things jump out. **(1) (b)/(c) dominate at every depth, and the gap is already enormous at cold start.** Even at turn 1 — no prior turns, the hardest case — (b)/(c) sit at ~1.9 while (a) 1M is at **6.80** and base at 4.38. Keeping observation tokens in the loss builds a terminal prior that works from the first turn, not just once context accumulates. **(2) Every arm sharpens with depth except (a) 1M, which stays catastrophic.** base 4.38 → 3.32 → 2.27, (b) 1M 2.41 → 1.16 → 1.07, (c) 1.88 → 1.24 → 1.14 — all improve monotonically as the conversation grows. But (a) 1M goes 6.80 → 5.65 → 3.33: it improves *slower* and remains the worst non-base arm at every depth, ending *above the untrained base* at turn 15. Standard agent SFT has specialized so hard on emitting commands that it is a poor terminal predictor regardless of how much environment context it is given. (All n=100, teacher-forced; turn-15 column reproduces the [probe table](/world-model-probe) exactly.)
 
