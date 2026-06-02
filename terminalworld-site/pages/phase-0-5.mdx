@@ -11,13 +11,26 @@ Phase 0.5 is the **downstream payoff** experiment: *does training an agent again
 
 The simulator is either the [dedicated env-rewritten simulator](/world-model-probe) or the new [(c) user-only model](/phase-0); the [world-model probe](/world-model-probe) is what tells us a 1.7B simulator is even good enough to try this.
 
-### Closed-loop self-play is now running — the two-vLLM blocker is gone
+### Closed-loop self-play works — coherence holds and the sim turn is ~0.7 s
 
-**The unblock:** arm **(b) full-transcript 1M is a policy *and* a world model in one network** (it was trained on the whole transcript — assistant turns are commands, user turns are observations). So a **single vLLM plays both roles**, alternating turn by turn, and the two-vLLM-on-one-chip coordination that killed the earlier attempt (`TPU_VISIBLE_CHIPS` not honored) simply doesn't arise. One v6e-4, one model, agent ↔ simulator self-play seeded from held-out tasks ([`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)). **This is running now** (20 episodes × up to 50 turns); the coherence/cost results replace the projections below as they land.
+**The unblock:** arm **(b) full-transcript 1M is a policy *and* a world model in one network** (it was trained on the whole transcript — assistant turns are commands, user turns are observations). So a **single vLLM plays both roles**, alternating turn by turn, and the two-vLLM-on-one-chip coordination that killed the earlier attempt (`TPU_VISIBLE_CHIPS` not honored) simply doesn't arise. One v6e-4, one model, agent ↔ simulator self-play seeded from 20 held-out tasks, up to 50 turns each ([`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)).
 
-The three documented simulator pathologies (loops, no-EOS runaway, `<think>` leak) all came from the **dropped dedicated env-rewritten sim**, the *worst* checkpoint; the self-play run uses **(b) 1M** — the best simulator (env-PPL 1.07, lowest degeneration of any genuine generator) — with the [degeneration fixes](/simulator-samples) applied to the sim turn (`max_tokens=512`, repetition penalty, thinking disabled).
+**Results** (20 episodes, 910 simulated turns, real measurements — not projections):
 
-**One honest limit:** a *fully*-simulated rollout has **no ground-truth pass/fail** — if the simulator also writes the test output, "tests passed" is itself a hallucination. So self-play validates **closed-loop coherence and cost**, not pass@1. The real payoff number needs the separate experiment: **SFT an agent on simulator-generated rollouts, then eval that agent on the *real* container** (the sim replaces the env during data generation; grading stays real).
+| metric | value |
+|---|---|
+| mean turns survived | 45.8 / 50 (median 50) |
+| degeneration in closed loop | **16 / 910 sim turns = 1.76%** |
+| episodes with zero degeneration | 11 / 20 |
+| agent latency | 0.73 s/turn |
+| **simulator latency** | **0.74 s/turn** |
+| per-turn total (agent + sim) | **1.45 s** |
+
+Two findings. **(1) The closed loop self-stabilizes.** Degeneration is **1.76%** here versus **13%** for the same checkpoint in single-shot [free sampling](/simulator-samples) — because each observation is conditioned on a coherent real trajectory prefix, the model stays on the rails far better than when sampling a one-off observation cold. The three documented pathologies (loops, no-EOS runaway, `<think>` leak) all came from the *dropped* dedicated env-rewritten sim, the worst checkpoint; with **(b) 1M** plus the [degeneration fixes](/simulator-samples) on the sim turn (`max_tokens=512`, repetition penalty, thinking disabled), the loop holds for full 50-turn episodes. **(2) The simulator is cheap** — **0.74 s/turn**, so a full agent+sim turn is **~1.5 s**, well under a real Daytona container round-trip, and it removes Daytona's 100-instance cap entirely (the simulator is just another TPU). As expected, the agent rarely clean-terminates (5/20; 15 hit the turn cap) — the same behavior the [free batch-shrinkage probe](#free-probe--does-the-active-batch-tail-shrink) predicted at this scale.
+
+**One honest limit:** a *fully*-simulated rollout has **no ground-truth pass/fail** — if the simulator also writes the test output, "tests passed" is itself a hallucination. So this validates **closed-loop coherence and cost**, not pass@1. The real payoff number needs the separate experiment: **SFT an agent on simulator-generated rollouts, then eval that agent on the *real* container** (the sim replaces the env during data generation; grading stays real). With coherence + cost now confirmed, that is the clear next step.
+
+Run at `gs://marin-us-east5/closed-loop/b1m-selfplay-2/` (per-episode files + transcripts).
 
 #### Earlier Stage-1 attempt (superseded)
 
@@ -117,7 +130,9 @@ SIM  (38 chars):  <think>
 
 That's not a terminal observation — Qwen3's thinking-mode opening tokens are being emitted as the whole response. Another deep-context example *does* eventually produce real-looking output but prefixed by `<think>...</think>`. The simulator was trained on contexts up to 8K but eval feeds it 25K+, so the base Qwen3 thinking-mode template wins at distances RoPE wasn't tuned for.
 
-## Per-turn budget projection
+## Per-turn budget projection *(superseded by the measured results above)*
+
+> This projection predates the closed-loop run. It held up: the measured per-turn total is **1.45 s** (agent 0.73 + sim 0.74), even better than the ~5–9 s projected here, confirming the qualitative conclusion. Kept for the record.
 
 Assuming the runaway is patched by capping inference `max_tokens` at ~512 (training-data observation length is ~200 tokens median; 512 is plenty of headroom):
 
