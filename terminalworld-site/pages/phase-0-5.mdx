@@ -2,165 +2,47 @@
 title: Phase 0.5 — closed-loop validation
 ---
 
-# Phase 0.5 cheap validation — closed-loop agent ↔ simulator
+import { Phase05Browser } from '../components/Phase05Browser'
 
-Phase 0.5 is the **downstream payoff** experiment: *does training an agent against the learned simulator actually produce a better agent?* This is the question the whole project exists to answer — replace the Docker container with a neural net during training. Two stages of increasing ambition:
+# Phase 0.5 — closed-loop agent ↔ simulator
 
-1. **Static env-substitution** (offline): hold the agent's commands fixed at the real SWE-ZERO trajectory and replace only the env-response messages with the simulator's predictions, then SFT an agent on the substituted data and eval pass@1. Isolates "sim env vs real env" with no agent-distribution-shift confound. *(This was "arm (c)" in earlier versions of [Phase 0](/phase-0) before that slot was reassigned to the user-only loss mask.)*
-2. **Closed-loop** (online): let the agent and simulator talk in real time, so the agent's distribution shift under simulated environments is finally exercised.
+**The question:** can an agent run a full task against the *learned* simulator instead of a Docker container — coherently and cheaply?
 
-The simulator is either the [dedicated env-rewritten simulator](/world-model-probe) or the new [(c) user-only model](/phase-0); the [world-model probe](/world-model-probe) is what tells us a 1.7B simulator is even good enough to try this.
+**The unblock:** (b) full-transcript 1M is a policy *and* a world model in one network (assistant turns = commands, user turns = observations). So a **single vLLM plays both roles**, alternating turn by turn — no two-process coordination (the `TPU_VISIBLE_CHIPS` issue that stalled the earlier attempt). One v6e-4, 20 held-out tasks, up to 50 turns each ([`closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)).
 
-### Closed-loop self-play works — coherence holds and the sim turn is ~0.7 s
-
-**The unblock:** arm **(b) full-transcript 1M is a policy *and* a world model in one network** (it was trained on the whole transcript — assistant turns are commands, user turns are observations). So a **single vLLM plays both roles**, alternating turn by turn, and the two-vLLM-on-one-chip coordination that killed the earlier attempt (`TPU_VISIBLE_CHIPS` not honored) simply doesn't arise. One v6e-4, one model, agent ↔ simulator self-play seeded from 20 held-out tasks, up to 50 turns each ([`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)).
-
-**Results** (20 episodes, 910 simulated turns, real measurements — not projections):
+## Results (20 episodes, 910 simulated turns — measured, not projected)
 
 | metric | value |
 |---|---|
-| mean turns survived | 45.8 / 50 (median 50) |
-| degeneration in closed loop | **16 / 910 sim turns = 1.76%** |
-| episodes with zero degeneration | 11 / 20 |
-| agent latency | 0.73 s/turn |
-| **simulator latency** | **0.74 s/turn** |
+| mean turns survived | 45.8 / 50 |
+| degeneration in closed loop | **1.76%** (16 / 910 turns) |
+| simulator latency | **0.74 s/turn** |
 | per-turn total (agent + sim) | **1.45 s** |
+| clean termination | 5 / 20 |
 
-Two findings. **(1) The closed loop self-stabilizes.** Degeneration is **1.76%** here versus **13%** for the same checkpoint in single-shot [free sampling](/simulator-samples) — because each observation is conditioned on a coherent real trajectory prefix, the model stays on the rails far better than when sampling a one-off observation cold. The three documented pathologies (loops, no-EOS runaway, `<think>` leak) all came from the *dropped* dedicated env-rewritten sim, the worst checkpoint; with **(b) 1M** plus the [degeneration fixes](/simulator-samples) on the sim turn (`max_tokens=512`, repetition penalty, thinking disabled), the loop holds for full 50-turn episodes. **(2) The simulator is cheap** — **0.74 s/turn**, so a full agent+sim turn is **~1.5 s**, well under a real Daytona container round-trip, and it removes Daytona's 100-instance cap entirely (the simulator is just another TPU). As expected, the agent rarely clean-terminates (5/20; 15 hit the turn cap) — the same behavior the [free batch-shrinkage probe](#free-probe--does-the-active-batch-tail-shrink) predicted at this scale.
+1. **The loop self-stabilizes.** Degeneration is **1.76%** here vs **13%** for the same checkpoint in single-shot [free sampling](/simulator-samples) — conditioning each observation on a coherent trajectory prefix keeps the model on the rails. With (b) 1M + the [degeneration fixes](/simulator-samples) (`max_tokens=512`, repetition penalty, thinking off), it holds for full 50-turn episodes.
+2. **The simulator is cheap** — 0.74 s/turn, ~1.5 s per full turn, well under a Daytona round-trip, and it removes Daytona's 100-instance cap (the sim is just another TPU).
 
-**One honest limit:** a *fully*-simulated rollout has **no ground-truth pass/fail** — if the simulator also writes the test output, "tests passed" is itself a hallucination. So this validates **closed-loop coherence and cost**, not pass@1. The real payoff number needs the separate experiment: **SFT an agent on simulator-generated rollouts, then eval that agent on the *real* container** (the sim replaces the env during data generation; grading stays real). With coherence + cost now confirmed, that is the clear next step.
+**Honest limit:** a fully-simulated rollout has **no ground-truth pass/fail** — if the sim writes the test output, "tests passed" is a hallucination. This validates **coherence and cost**, not pass@1. The payoff number needs the next experiment: **SFT an agent on sim-generated rollouts, then eval on the *real* container** — sim replaces the env during data generation, grading stays real.
 
-Run at `gs://marin-us-east5/closed-loop/b1m-selfplay-2/` (per-episode files + transcripts).
+## Browse real rollouts
 
-#### Earlier Stage-1 attempt (superseded)
+The same (b) 1M network is both agent and simulator; agent turns are amber, simulator observations blue, degenerate turns flagged.
 
-The static env-substitution job ([`scripts/substitute_env_with_simulator.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/substitute_env_with_simulator.py)) regenerated every env message in the 10K trajectories with the simulator, then [`…_10k_8k_tw_substituted.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_10k_8k_tw_substituted.py) trained an agent on it. Six iris launches died on the controller's ~2 hr TTL. Superseded by the single-model self-play above, which needs no offline substitution pass.
+<Phase05Browser />
 
-### Where's the bottleneck? Two cheap probes
+## How we got here (superseded notes)
 
-Before booking real TPU time on the two-machine closed-loop setup, two cheap probes to find the actual bottleneck.
+<details>
+<summary>Pre-run probes and the dropped dedicated simulator</summary>
 
-## Free probe — does the active batch tail shrink?
+**Batch-shrinkage (free probe):** counting active arm-(a) trajectories per turn showed 84% run to `max_turns=50` (the 10K agent rarely clean-terminates), so the active batch never drops below ~quarter-full — batch shrinkage isn't a real cost at this scale. Confirmed in the run above (5/20 clean-terminate).
 
-Going in, the bet was that batches would collapse over turn-positions as trajectories ended at different lengths, killing vLLM throughput. We can measure this for *free* by reading arm (a)'s 100 trajectories (Daytona, `max_turns=50`) and counting active trajectories at each turn-position:
+**Latency sweep & the three pathologies:** an earlier characterization used the *dedicated env-rewritten simulator* (since dropped as not apples-to-apples) and surfaced three failure modes — output-length loops, no-EOS runaway, and Qwen `<think>`-mode leakage at long context. All three are addressed by the sim-turn fixes used above (`max_tokens=512`, repetition penalty, `enable_thinking=false`), which is why the closed-loop degeneration is only 1.76%.
 
-```
- turn  active    frac
-    1      93    100%  ████████████████████████████████████████
-   10      93    100%  ████████████████████████████████████████
-   20      83     89%  ███████████████████████████████████
-   30      79     85%  █████████████████████████████████
-   50      78     84%  █████████████████████████████████
-```
-
-**Refuted.** 84% of arm (a) trajectories run to `max_turns=50` because the 10K model doesn't know how to clean-terminate. Active batch never drops below quarter-full. This holds for the current 10K checkpoints; once the agent learns to clean-submit (likely at 100K+), the tail *will* shrink, but for cheap Phase 0.5 validation now, batch shrinkage is not a real cost.
-
-## Paid probe — single-vllm sim latency sweep on v6e-4
-
-Two-vLLM-on-one-machine failed: `TPU_VISIBLE_CHIPS` isn't honored by vllm-tpu, the dual processes contended on chips, neither came up in 15 min. Pivoted to single-vllm sim characterization on a v6e-4 in us-east5 — driving synthetic chat requests built from real arm (a) histories at concurrency in {1,2,4,8} × turn_depth in {1,5,10,20,35}, three trials per cell. Run at `gs://marin-us-east5/sim-latency-smoke/run-1779394976/`.
-
-| concurrency | depth=1 | depth=5 | depth=10 | depth=20 | depth=35 |
-|---:|---:|---:|---:|---:|---:|
-| 1 | 1.5 s | 2.0 s | **16.5 s** | **16.2 s** | 0.1 s |
-| 2 | 1.0 s | 16.7 s | 18.4 s | 18.0 s | 1.1 s |
-| 4 | 13.6 s | 15.9 s | 16.1 s | 16.0 s | 1.2 s |
-| 8 | 16.2 s | 17.0 s | 16.4 s | 16.5 s | 1.1 s |
-
-(per-cell mean wall to clear the batch, seconds)
-
-The 16-second plateau is just `max_tokens=4096 / ~256 tok/s/req` — at moderate depth the sim runs away and decode hits the cap. Throughput itself is fine: vLLM holds ~200–300 tok/s/request, ~1000 tok/s aggregate at batch=4. The bottleneck for Phase 0.5 is **simulator quality**, not serving.
-
-## The three sim pathologies (samples)
-
-Pulled actual sim outputs at depth ∈ {1,10,35}, three histories each, with `max_tokens` ∈ {4096, 512}. Run at `gs://marin-us-east5/sim-samples/run-1779415126/`. Three failure modes by context depth:
-
-### Depth 1 — basic mimicry works, but with output-length pathology
-
-`find . -path "*/models*"` returns a plausible-looking list of django paths (format correct, paths hallucinated but reasonable). A repeated `grep "resolve_lookup_value"` query loops:
-
-```
-REAL (240 chars):
-  Observation: ./django/db/models/sql/query.py:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
-               ./django/db/models/sql/query.py:        value = self.resolve_lookup_value(value, can_reuse, allow_joins, simple_col)
-
-SIM (868 chars):
-  Observation: ./django/db/models/fields/__init__.py:    def resolve_lookup_value(self, value):
-               ./django/db/models/fields/__init__.py:        return self.resolve_lookup_value(value)
-               ./django/db/models/fields/__init__.py:        return self.resolve_lookup_value(value)
-               [...same line 8 more times...]
-```
-
-`cat <large file>` devolves to pure token-repetition:
-
-```
-SIM: ...BaseBaseAdminMixin, BaseBaseBaseInline, BaseBaseBaseTabularInline,
-     BaseBaseBaseStackedInline, BaseBaseBaseModelAdmin, BaseBaseBaseAdmin,
-     BaseBaseBaseTabularAdmin, BaseBaseBaseAdminMixin, BaseBaseBaseBaseInline, ...
-```
-
-### Depth 10 — format is right, doesn't know to stop
-
-`sed -n '1053,1085p' query.py`:
-
-```
-REAL (1958 chars):  1053:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
-                    1054-        if hasattr(value, 'resolve_expression'):
-                    [...realistic numbered sed output, ends ~1958 chars...]
-
-SIM (16,535 chars): 100:    def resolve_lookup_value(self, value, can_reuse, allow_joins, simple_col):
-                    101-        if hasattr(value, 'resolve_expression'):
-                    [...identical format, keeps emitting more & more functions until max_tokens=4096 cap...]
-```
-
-Capping at `max_tokens=512` gives byte-identical content to the first 2K chars of the 4096-cap version — the runaway *is* "doesn't emit EOS," not a content-quality regression.
-
-### Depth 35 — Qwen thinking-mode tokens leak
-
-```
-REAL (84 chars):  Observation: 917:        qs = self.remote_field.model._default_manager.using(using).filter(
-
-SIM  (38 chars):  <think>
-                  
-                  </think>
-                  
-                  <think>
-                  
-                  </think>
-```
-
-That's not a terminal observation — Qwen3's thinking-mode opening tokens are being emitted as the whole response. Another deep-context example *does* eventually produce real-looking output but prefixed by `<think>...</think>`. The simulator was trained on contexts up to 8K but eval feeds it 25K+, so the base Qwen3 thinking-mode template wins at distances RoPE wasn't tuned for.
-
-## Per-turn budget projection *(superseded by the measured results above)*
-
-> This projection predates the closed-loop run. It held up: the measured per-turn total is **1.45 s** (agent 0.73 + sim 0.74), even better than the ~5–9 s projected here, confirming the qualitative conclusion. Kept for the record.
-
-Assuming the runaway is patched by capping inference `max_tokens` at ~512 (training-data observation length is ~200 tokens median; 512 is plenty of headroom):
-
-| component | cost |
-|---|---|
-| agent call (batch=4, from arm (a) eval) | ~3–5 s |
-| sim call (this experiment, with `max_tokens=512`) | ~2–4 s |
-| **total per turn** | **~5–9 s** |
-| (compare: agent + real Daytona) | ~7–13 s |
-
-Closed-loop is **roughly competitive with Daytona**, not 5–10× more expensive. Big win is removing the Daytona 100-instance cap. The cost is one extra TPU for the simulator.
-
-## Updated Phase 0.5 blockers
-
-Reranked after the data lands:
-
-1. **Sim quality** — the three pathologies above. Solvable: (a) cap inference `max_tokens` near training distribution; (b) ensure rewritten sim training data has `<|im_end|>` at observation boundaries; (c) retrain sim with longer-context examples or run with `enable_thinking=false` at inference.
-2. **Two-vLLM coordination** — `TPU_VISIBLE_CHIPS` isn't honored; need either two separate iris jobs (no inter-job networking today), Ray on v6e-8 with sub-meshes, or shipping the orchestrator across two v6e-4 machines.
-3. ~~Tail batch shrinkage~~ — refuted at 10K scale (will reappear when agent learns to terminate).
-4. ~~Prefill cost at long context~~ — throughput stays at ~250 tok/s across depths, not a bottleneck.
+**Per-turn budget projection:** pre-run estimate was ~5–9 s/turn; the measured 1.45 s beat it. The earlier dual-vLLM attempt failed (`TPU_VISIBLE_CHIPS` not honored); the single-model self-play above sidesteps it entirely.
+</details>
 
 ## Reproduce
 
-Code pinned at commit [`da8d12e`](https://github.com/AlienKevin/marin/tree/da8d12e6b5a79a8186ff75104145c40a28e0ec07) on the `terminalworld` branch. All three probes are iris jobs on a single v6e-4 (us-east5):
-
-- **Free batch-shrinkage analysis** — read directly from arm (a)'s eval trajectories ([HF dataset](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval)), no job needed.
-- **Dual-vLLM closed-loop attempt** (failed: `TPU_VISIBLE_CHIPS` not honored) — [`scripts/closed_loop_smoke.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/closed_loop_smoke.py).
-- **Single-vLLM sim latency sweep** — [`scripts/sim_latency_smoke.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_latency_smoke.py) → `gs://marin-us-east5/sim-latency-smoke/run-1779394976/`.
-- **Sim response sampling (the three pathologies)** — [`scripts/sim_sample_responses.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/scripts/sim_sample_responses.py) → `gs://marin-us-east5/sim-samples/run-1779415126/`.
-
-Simulator checkpoint: `gs://marin-us-east5/checkpoints/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8192tokens_arch32k_v5p8-83663d/hf/step-1249` (trained by [`exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8k.py`](https://github.com/AlienKevin/marin/blob/da8d12e6b5a79a8186ff75104145c40a28e0ec07/experiments/exp5611_sft_qwen3_1_7b_swe_zero_sim_10k_8k.py)).
+[`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py) on a single v6e-4 (us-east5); simulator = (b) 1M `…_1m_8192tokens_arch32k_echo_v5p32-a2b7ba/hf/step-15624`. Output (per-episode files, heartbeat, transcripts): `gs://marin-us-east5/closed-loop/b1m-selfplay-2/`.
