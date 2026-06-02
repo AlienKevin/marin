@@ -32,6 +32,16 @@ A terminal observation can be one of two very different things. Sometimes it's a
 
 So "(b) is a better world model than (a)" resolves to something precise: **the two arms are indistinguishable on retrieval, and the entire global gap (1.07 vs 3.33 median) is concentrated in the generation-heavy and empty buckets** — exactly the cases that require *being* a terminal rather than copying one. This is the quantitative form of *format generalizes, content memorizes*.
 
-Browse all trials below — pick 1–2 models, filter by regime. Each cell shows that model's **per-trial** env-PPL (not the corpus mean) and a representative sample, with all 5 draws expandable.
+## When you sample (not score), outputs degenerate into loops
+
+The env-PPL numbers above are *teacher-forced* — scored against the real observation. But when you **free-run** the model (sample at temperature 1.0, as in the cards below), a large fraction of generations collapse into repetition: runaway imports, one line echoed to the token cap, an incrementing counter that never stops. Across all **1,380** sampled generations (46 trials × 6 checkpoints × 5 draws), **26.9% degenerate** (long *and* near-perfectly compressible). The full breakdown is on the [sampling-degeneration page](/degeneration); the three findings that matter here:
+
+- **It's a *decoding* failure, invisible to perplexity — and worst at *good* PPL.** Degeneration peaks in the **PPL 1.5–3 band at 42.3%**, not at high PPL; the worst single looper sits at **PPL 1.3**. A low teacher-forced score does **not** certify a checkpoint as a usable simulator — free-running stability is a separate axis. (The exemplar that prompted this: (b) 1M on `ossf/package-analysis`, env-PPL **2.50**, looping `analysis_module_2, _3, _4, …` to ~20k chars.)
+- **Degeneration tracks how much a model actually *generates*** — base **92%** (format, no control), (b)/(c) **13–24%** (the price of genuinely emitting long content), and **(a) 1M only 1.3% — a false virtue**: it doesn't loop because it doesn't generate observations at all (it emits a short command and stops). Same pathology as its terrible env-PPL, seen from the other side.
+- **Three mechanical kinds** among the 371 degenerate samples: n-gram loops (169), exact-line loops (165), incrementing-counter loops (37). Degenerate samples run to a median **17,037 chars** (vs 134 for clean ones) and **74%** hit the 4,096-token cap — they stop only because they run out of budget, and compress ~16× more than the real observations they imitate (zlib 0.021 vs 0.327).
+
+**Takeaway:** grade simulators on free-running stability, not just perplexity, and serve with repetition-aware decoding (repetition penalty / no-repeat-ngram / nucleus) rather than raw temperature-1.0. See [/degeneration](/degeneration) for the per-model, per-bucket, and per-PPL-band charts.
+
+Browse all trials below — pick 1–2 models, filter by regime. Each cell shows that model's **per-trial** env-PPL (not the corpus mean) and a representative sample, with all 5 draws expandable. Degenerate samples are exactly the long, repetitive ones you'll see in the "all 5 samples" expanders.
 
 <SampleExplorer />
