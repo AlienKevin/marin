@@ -66,9 +66,11 @@ Six harness fixes from #5611 are load-bearing — without any of them arm (a) ge
 
 ## Eval protocol
 
-Harbor + mini-swe-agent v1 + Daytona, 100-task slice from #5611. vLLM native on v6e-4 us-east5, `max_model_len=32768`, `tensor_parallel_size=4`, temp 1.0. Sharded 10 × 10 tasks with 4 concurrent Daytona instances per shard = 40 in-flight. Daytona's 100-instance cap means arms run sequentially, not in parallel. Pass@1 = latest trial per task, joined on `task_id` with the `timestamp` field from harbor's `samples_*.jsonl` (deterministic — disk mtime gets clobbered by `gcloud storage rsync`, don't use it).
+Harbor + mini-swe-agent v1 + Daytona, 100-task slice from #5611. vLLM native on v6e-4 us-east5, `max_model_len=32768`, `tensor_parallel_size=4`, temp 1.0. Sharded 10 × 10 tasks with 4 concurrent Daytona instances per shard = 40 in-flight. Daytona's 100-instance cap means arms run sequentially, not in parallel.
 
-## Results (2026-05-28)
+**Scoring rule (pass@1, first-trial).** For each task we take the **first trial by `started_at`** that reflects the model's own behavior — a graded result (0 or 1) *or* a `ContextWindowExceededError` (the agent overran the 32K window without committing a patch, which counts as a **model failure, 0** — not ignored). Only **genuine infrastructure failures** (Daytona sandbox errors — 2 trials total across all runs, both in (b) 1M rep1) are ignored, falling the task through to its next trial. We do **not** take best-of-N over retries, and no task was all-infra, so the denominator stays **100**. Retries only ever occurred in the (b) 1M re-runs; every other cell is single-trial, where first-trial = the only trial.
+
+## Results (2026-05-28; (b) 1M re-run 3× 2026-06-02)
 
 All three scales now have (a) and (b) numbers on the 100-task slice.
 
@@ -76,11 +78,13 @@ All three scales now have (a) and (b) numbers on the 100-task slice.
 |---|---:|---:|---:|
 | 10K | **7 / 100** | **5 / 100** | 2 pp |
 | 100K | **9 / 100** | **8 / 100** | 1 pp |
-| **1M** | **11 / 100** | **4 / 100** | **7 pp** ← trend reverses |
+| **1M** | **11 / 100** | **6 / 100** † | **5 pp** |
 
-The 10K → 100K trend was consistent with the dilution hypothesis (gap narrowing 2 → 1 pp). **At 1M the gap widens to 7 pp** — directionally opposite. Three plausible reads:
+† (b) 1M is the **mean of 3 eval reps (same checkpoint, temp = 1.0 resample): 4 / 9 / 5** (pooled 18 / 300 = 6.0%), after the original single 4 / 100 looked suspiciously low. All other cells are single runs. Scored under the first-trial rule above.
 
-1. **Single-seed noise.** The 1M (b) run had 1 trial per task (no Daytona retries), so pass@1 = pass@N = single sample at temp=1.0. With N=100 and arms at p ≈ 0.04 vs 0.11, the gap's noise std is roughly ±4 pp, so 7 pp is ~1.75σ from zero — directional but not bulletproof. A second seed or a 3-trial re-run is the cheapest disambiguator.
+The 10K → 100K trend was consistent with the dilution hypothesis (gap narrowing 2 → 1 pp). **At 1M the gap re-widens to 5 pp** — directionally opposite. Three plausible reads:
+
+1. **Eval-sampling noise — now bounded.** The original (b) 1M run scored 4 / 100; **re-sampling the same checkpoint 3× at temp 1.0** gives **4 / 9 / 5** (mean 6, sample SD ≈ 2.6, SEM ≈ 1.5 pp). So 4/100 was a low decoding draw — but even the mean (6) sits below (a)'s single-run 11, so the reversal is real, just smaller than one seed implied. This bounds *eval* (decoding) variance; the *training-seed* variance of a fresh SFT run is still unmeasured, as is (a) 1M's own resample.
 2. **Real env-token contamination at scale.** If env-token loss is teaching bad habits, more data could amplify rather than dilute. Would invert the smooth 10K → 100K trend, but the trend was based on only two points.
 3. **Hyperparameter / LR mismatch.** Same LR/schedule as arm (a) 1M, but the wider loss mask effectively trains on different gradient distributions; the optimal LR/decay for (b) might differ.
 
@@ -88,7 +92,7 @@ The 10K → 100K trend was consistent with the dilution hypothesis (gap narrowin
 
 (b) 10K solves: `django__django-{14855, 15368, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-8399`.
 (b) 100K solves: `django__django-{12050, 13109, 13363, 14855, 15277, 15467}`, `pydata__xarray-4629`, `pytest-dev__pytest-10081`.
-(b) 1M solves: `django__django-{12050, 13109, 15467}`, `pydata__xarray-4629`. Overlap with (a) 1M: 3 shared, 1 (b)-unique (`django-13109`), 8 (a)-unique.
+(b) 1M solves (per rep): **rep0** (4) `django__django-{12050, 13109, 15467}` + `pydata__xarray-4629`; **rep1** (9) those plus `django__django-{13363, 14855, 15277, 15368, 15987}` (−`12050` recurs); **rep2** (5) `django__django-{13109, 14855, 15368, 16527}` + `pydata__xarray-4629`. Only `django-13109` and `pydata__xarray-4629` solve in **all three** reps. Against (a) 1M's 11 solves, `django-13109` is the robust **(b)-unique** win (a) never gets; (a) uniquely holds 5 (`pylint-6903`, `pytest-8399`, `scikit-learn-15100`, `sphinx-8721`, `sphinx-9698`). `django-16527` is the one task the first-trial rule **demotes**: in rep1 its first attempt overran the context window (model failure → 0); a later retry passed, but best-of-N is not used.
 
 HF datasets: [(a) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-eval) · [(b) 10K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-10K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-eval) · [(b) 100K](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-100K-Qwen3-1.7B-Base-ECHO-eval) · [(a) 1M](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-1M-Qwen3-1.7B-Base-eval) · [(b) 1M](https://huggingface.co/datasets/AlienKevin/SWE-ZERO-1M-Qwen3-1.7B-Base-ECHO-eval).
 
@@ -103,7 +107,7 @@ The pass@1 gap is small, but the *way* (b) and (a) reach those numbers differs. 
 | zero-edit tasks (50 turns, no commit) | 18 / **39** of 93 | 5 / **12** of 91 |
 | empty assistant turns | 0 / **28** | **0 / 0** |
 
-(b) reads more, edits less, and at 10K occasionally emits literally nothing (the empty-turn pathology). The empty-turn pathology resolves entirely at 100K; the read/edit imbalance compresses but persists. Representative failure modes seen in individual (b) trajectories where the latest-attempt-wins tiebreak fell against (b):
+(b) reads more, edits less, and at 10K occasionally emits literally nothing (the empty-turn pathology). The empty-turn pathology resolves entirely at 100K; the read/edit imbalance compresses but persists. Representative failure modes seen in individual (b) trajectories that did not solve their task:
 
 - `django__django-12050`: **1 sed in 50 turns**, then repeated `python -c "from ... import resolve_lookup_value"` import attempts failing because the fix was never applied.
 - `django__django-14855`: **47 greps, 0 seds** — the model searched the codebase non-stop, never committing.

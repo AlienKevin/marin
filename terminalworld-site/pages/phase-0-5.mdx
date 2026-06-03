@@ -8,26 +8,43 @@ import { Phase05Browser } from '../components/Phase05Browser'
 
 **The question:** can an agent run a full task against the *learned* simulator instead of a Docker container — coherently and cheaply?
 
-**The unblock:** (b) full-transcript 1M is a policy *and* a world model in one network (assistant turns = commands, user turns = observations). So a **single vLLM plays both roles**, alternating turn by turn — no two-process coordination (the `TPU_VISIBLE_CHIPS` issue that stalled the earlier attempt). One v6e-4, 20 held-out tasks, up to 50 turns each ([`closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py)).
+**The unblock:** (b) full-transcript 1M is a policy *and* a world model in one network (assistant turns = commands, user turns = observations). So a **single vLLM plays both roles**, alternating turn by turn — no two-process coordination (the `TPU_VISIBLE_CHIPS` issue that stalled the earlier attempt). One v6e-4, 20 held-out tasks, up to 50 turns each ([`closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/c46b3e4f5789bd22ec4100b38e10031a77fa2897/scripts/closed_loop_selfplay.py)).
 
 ## Results (20 episodes, 910 simulated turns — measured, not projected)
 
 | metric | value |
 |---|---|
 | mean turns survived | 45.8 / 50 |
-| degeneration in closed loop | **1.76%** (16 / 910 turns) |
 | simulator latency | **0.74 s/turn** |
 | per-turn total (agent + sim) | **1.45 s** |
-| clean termination | 5 / 20 |
+| catastrophic sim degeneration (runaway loop) | **1.76%** (16 / 910 turns) |
+| any noticeable sim repetition (broader) | **5.9%** (54 / 910) |
+| episodes where the agent repeats a command ≥3× | **19 / 20** |
+| clean termination (submit marker; **no graded patch**) | 5 / 20 |
+| episodes issuing ≥1 real edit command (`sed -i`/heredoc/`tee`) | 11 / 20 (**98** cmds) |
+| episodes producing an actual diff / patch | **0 / 20** |
 
-1. **The loop self-stabilizes.** Degeneration is **1.76%** here vs **13%** for the same checkpoint in single-shot [free sampling](/simulator-samples) — conditioning each observation on a coherent trajectory prefix keeps the model on the rails. With (b) 1M + the [degeneration fixes](/simulator-samples) (`max_tokens=512`, repetition penalty, thinking off), it holds for full 50-turn episodes.
+1. **The loop self-stabilizes against catastrophic loops.** Runaway degeneration is **1.76%** here vs **13%** for the same checkpoint in single-shot [free sampling](/simulator-samples) — conditioning each observation on a coherent trajectory prefix keeps the model on the rails. With (b) 1M + the [degeneration fixes](/simulator-samples) (`max_tokens=512`, repetition penalty, thinking off), it holds for full 50-turn episodes. *Milder* repetition persists, though (see [breakdown below](#what-the-repetition-actually-looks-like)) — "self-stabilizes" is about page-out blow-ups, not all repetition.
 2. **The simulator is cheap** — 0.74 s/turn, ~1.5 s per full turn, well under a Daytona round-trip, and it removes Daytona's 100-instance cap (the sim is just another TPU).
+3. **"Termination" is not a real patch.** All **5/20** clean terminations ended with the agent emitting the submit marker (`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`), and **11/20** episodes issued genuine edit commands (`sed -i`, `cat <<EOF`, `tee` — 98 in total). But **no episode produced an actual diff/patch** (0/20): with no real filesystem behind the loop, those edits were never applied — the simulator just emitted plausible success (`google/swift-benchmark` ep: *"All changes applied successfully!"*). One of the 5 submitting episodes (`lucasbento/create-graphql`) made **zero edits** and declared done on changes it had only *described*. A clean termination here means *the agent believed it finished*, not that a verifiable fix exists.
 
-**Honest limit:** a fully-simulated rollout has **no ground-truth pass/fail** — if the sim writes the test output, "tests passed" is a hallucination. This validates **coherence and cost**, not pass@1. The payoff number needs the next experiment: **SFT an agent on sim-generated rollouts, then eval on the *real* container** — sim replaces the env during data generation, grading stays real.
+**Honest limit:** a fully-simulated rollout has **no ground-truth pass/fail** — finding 3 is the concrete face of it: the agent "submits," the sim rubber-stamps, and nothing is graded. If the sim writes the test output, "tests passed" is a hallucination. This validates **coherence and cost**, not pass@1. The payoff number needs the next experiment: **SFT an agent on sim-generated rollouts, then eval on the *real* container** — sim replaces the env during data generation, grading stays real.
+
+## What the repetition actually looks like
+
+The headline **1.76%** is the *catastrophic* rate — a simulator turn that runs > 800 chars and is almost pure repetition (zlib ratio < 0.08), the unusable page-out loop. Loosening to **any human-noticeable repetition** (≥ 3 identical lines, a 2–6-line block repeated ≥ 3×, an incrementing counter, or > 40% duplicate lines) lifts it to **5.9%** (54 / 910) — still ~5× rarer than the 13%+ of unconditioned free sampling, because each observation is anchored to a real trajectory prefix. The 54 split into the same three mechanical kinds as [free sampling](/simulator-samples):
+
+| kind | count | example |
+|---|--:|---|
+| exact-line loop (a line echoed ≥ 3×) | 33 | `.assertIn(...)` repeated |
+| block loop (a 2–6-line block repeated) | 13 | a stanza of file output looped |
+| incrementing counter | 8 | `analysis_module_2, _3, _4, …` |
+
+But the repetition you actually *notice* browsing is mostly **agent-side, not simulator-side**: only 1.5% of agent turns are internally repetitive, yet in **19 / 20 episodes** the policy re-issues the same command **≥ 3×** — the read-heavy, grep-on-repeat behavior from [Phase 0](/phase-0) (*"47 greps, 0 seds"*), now playing out against the learned env. So two distinct loops coexist: a *rare* simulator loop (well controlled) and a *pervasive* agent command-loop (a policy habit the simulator faithfully mirrors back).
 
 ## Browse real rollouts
 
-The same (b) 1M network is both agent and simulator; agent turns are amber, simulator observations blue, degenerate turns flagged.
+The same (b) 1M network is both agent and simulator; agent turns are amber, simulator observations blue. **Repeating observations are flagged** — orange for noticeable loops (e.g. a line echoed ×9), red for a runaway page-out. This catches the milder 5.9%-class repetition, not just the catastrophic 1.76%.
 
 <Phase05Browser />
 
@@ -45,4 +62,4 @@ The same (b) 1M network is both agent and simulator; agent turns are amber, simu
 
 ## Reproduce
 
-[`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/main/scripts/closed_loop_selfplay.py) on a single v6e-4 (us-east5); simulator = (b) 1M `…_1m_8192tokens_arch32k_echo_v5p32-a2b7ba/hf/step-15624`. Output (per-episode files, heartbeat, transcripts): `gs://marin-us-east5/closed-loop/b1m-selfplay-2/`.
+[`scripts/closed_loop_selfplay.py`](https://github.com/AlienKevin/marin/blob/c46b3e4f5789bd22ec4100b38e10031a77fa2897/scripts/closed_loop_selfplay.py) on a single v6e-4 (us-east5); simulator = (b) 1M `…_1m_8192tokens_arch32k_echo_v5p32-a2b7ba/hf/step-15624`. Output (per-episode files, heartbeat, transcripts): `gs://marin-us-east5/closed-loop/b1m-selfplay-2/`.
